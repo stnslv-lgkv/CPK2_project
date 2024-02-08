@@ -8,6 +8,8 @@ Authors:
 
 ### Introduction
 
+![IBS](/pics/IBS.png)
+
 Irritable Bowel Syndrome with constipation, known as IBS-C, is a subtype of Irritable Bowel Syndrome characterized by chronic constipation and associated abdominal pain. It affects approximately one-third of individuals with IBS and is considered a functional gastrointestinal disorder because it causes symptoms without an identifiable cause.
 
 The exact cause of IBS-C is not fully understood, but it is believed to involve a dysfunction in the digestive system or alterations in gut-brain communication that lead to improper regulation of intestinal movements. Factors such as genetic predisposition, age, gender, and coexisting conditions like GERD, indigestion, chronic fatigue syndrome, fibromyalgia, chronic pelvic pain, anxiety, depression, food intolerances, and small intestinal bacterial overgrowth may play a role.
@@ -39,6 +41,20 @@ Common causes of Irritable Bowel Syndrome with constipation (IBS-C) include:
 - Alcohol and smoking: Frequent alcohol consumption and current smoking are more common in people with IBS and are associated with stress 
 
 Management strategies for IBS-C often include lifestyle changes, dietary modifications, and medications aimed at addressing specific symptoms. Dietary adjustments and fiber supplements can sometimes alleviate symptoms, and some individuals may find relief through a low-FODMAP diet to identify and avoid foods that exacerbate symptoms. Probiotics have also been explored for their potential in managing IBS-C, though more research is needed to confirm their effectiveness.
+
+### Aim & tasks
+
+The **aim** of this project was to develop a methodology of analyzing data and compare the gut microbiota of healthy people with the gut microbiota of people with constipation-type IBS
+
+The following **tasks** were set in order to achieve the goal:
+
+1. Determination of sampling distributions in different categories of research subjects
+
+2. Search for meaningfully different microorganisms’ taxa (bacteria and archaea) and/or groups of taxon in categories of people
+
+3. Building classifiers based on the trained data for each level of classification
+
+4. Evaluation of the correlation between the presence/number of gas-producing bacteria and the constipation type of IBS
 
 ### References
 
