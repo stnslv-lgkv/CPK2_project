@@ -39,3 +39,12 @@ Common causes of Irritable Bowel Syndrome with constipation (IBS-C) include:
 - Alcohol and smoking: Frequent alcohol consumption and current smoking are more common in people with IBS and are associated with stress 
 
 Management strategies for IBS-C often include lifestyle changes, dietary modifications, and medications aimed at addressing specific symptoms. Dietary adjustments and fiber supplements can sometimes alleviate symptoms, and some individuals may find relief through a low-FODMAP diet to identify and avoid foods that exacerbate symptoms. Probiotics have also been explored for their potential in managing IBS-C, though more research is needed to confirm their effectiveness.
+
+### References
+
+1. Kool J, Tymchenko L, Shetty SA, Fuentes S. Reducing bias in microbiome research: comparing methods from sample collection to sequencing. Front Microbiol 2023;14:1094800. DOI:10.3389/fmicb.2023.1094800/full
+2. Marcos-Zambrano, L. J., Karaduzovic-Hadziabdic, K., Loncar Turukalo, T., Przymus, P., Trajkovik, V., Aasmets, O., et al. (2021). Applications of machine learning in human microbiome studies: A review on feature selection, biomarker identification, disease prediction and treatment. Front. Microbiol. 12, 634511. doi:10.3389/fmicb.2021.634511
+3. Lloyd-Price, J., Abu-Ali, G. & Huttenhower, C. The healthy human microbiome. Genome Med 8, 51 (2016). https://doi.org/10.1186/s13073-016-0307-y
+4. Pittayanon R., Lau J.T., Yuan Y., Leontiadis G.I., Tse F., Surette M., Moayyedi P. Gut Microbiota in Patients With Irritable Bowel Syndrome—A Systematic Review.  Gastroenterology,  157  (1) , pp. 97-108 (2019).  https://doi.org/10.1053/j.gastro.2019.03.049
+5. Zhang, S., Wang, R., Li, D., Zhao, L., Zhu, L. Role of gut microbiota in functional constipation. Gastroenterol. Rep. 2021, 9, 392–401.  https://doi.org/10.1093/gastro/goab035
+
