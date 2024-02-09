@@ -56,6 +56,10 @@ The following **tasks** were set in order to achieve the goal:
 
 4. Evaluation of the correlation between the presence/number of gas-producing bacteria and the constipation type of IBS
 
+### Results
+
+### Conclusion
+
 ### References
 
 [^1]: Kool J, Tymchenko L, Shetty SA, Fuentes S. Reducing bias in microbiome research: comparing methods from sample collection to sequencing. Front Microbiol 2023;14:1094800. https://doi:10.3389/fmicb.2023.1094800/full
