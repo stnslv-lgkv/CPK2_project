@@ -10,11 +10,11 @@ Authors:
 
 ![IBS](/pics/IBS.png)
 
-Irritable Bowel Syndrome with constipation, known as IBS-C, is a subtype of Irritable Bowel Syndrome characterized by chronic constipation and associated abdominal pain. It affects approximately one-third of individuals with IBS and is considered a functional gastrointestinal disorder because it causes symptoms without an identifiable cause[^1][^2].
+Irritable Bowel Syndrome with constipation, known as IBS-C, is a subtype of Irritable Bowel Syndrome characterized by chronic constipation and associated abdominal pain. It affects approximately one-third of individuals with IBS and is considered a functional gastrointestinal disorder because it causes symptoms without an identifiable cause [^1][^2].
 
-The exact cause of IBS-C is not fully understood, but it is believed to involve a dysfunction in the digestive system or alterations in gut-brain communication that lead to improper regulation of intestinal movements. Factors such as genetic predisposition, age, gender, and coexisting conditions like GERD, indigestion, chronic fatigue syndrome, fibromyalgia, chronic pelvic pain, anxiety, depression, food intolerances, and small intestinal bacterial overgrowth may play a role[^1][^5].
+The exact cause of IBS-C is not fully understood, but it is believed to involve a dysfunction in the digestive system or alterations in gut-brain communication that lead to improper regulation of intestinal movements. Factors such as genetic predisposition, age, gender, and coexisting conditions like GERD, indigestion, chronic fatigue syndrome, fibromyalgia, chronic pelvic pain, anxiety, depression, food intolerances, and small intestinal bacterial overgrowth may play a role [^1][^5].
 
-Common causes of Irritable Bowel Syndrome with constipation (IBS-C) include[^5]:
+Common causes of Irritable Bowel Syndrome with constipation (IBS-C) include [^5]:
 
 - Genetic predisposition: If a family member has IBS, your risk of developing the condition may be higher
 
@@ -40,7 +40,7 @@ Common causes of Irritable Bowel Syndrome with constipation (IBS-C) include[^5]:
 
 - Alcohol and smoking: Frequent alcohol consumption and current smoking are more common in people with IBS and are associated with stress 
 
-Management strategies for IBS-C often include lifestyle changes, dietary modifications, and medications aimed at addressing specific symptoms. Dietary adjustments and fiber supplements can sometimes alleviate symptoms, and some individuals may find relief through a low-FODMAP diet to identify and avoid foods that exacerbate symptoms. Probiotics have also been explored for their potential in managing IBS-C, though more research is needed to confirm their effectiveness[^3][^4].
+Management strategies for IBS-C often include lifestyle changes, dietary modifications, and medications aimed at addressing specific symptoms. Dietary adjustments and fiber supplements can sometimes alleviate symptoms, and some individuals may find relief through a low-FODMAP diet to identify and avoid foods that exacerbate symptoms. Probiotics have also been explored for their potential in managing IBS-C, though more research is needed to confirm their effectiveness [^3][^4].
 
 ### Aim & tasks
 
