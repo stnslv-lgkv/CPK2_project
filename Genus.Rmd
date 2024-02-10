@@ -1,0 +1,751 @@
+---
+title: "IBS2_gunus"
+author: "Maria Bochkareva"
+date: "2023-12-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+# Loading libraries
+
+library(readxl)
+library(dplyr)
+library(stringr)
+library(purrr)
+library(tidyr)
+library(ggplot2)
+library(broom)
+library(stats)
+library(Boruta)
+library(tibble)
+
+```
+
+## Data preprocessing
+
+```{r}
+
+# Uploading files
+
+excel_sheets <- excel_sheets("./raw/Bacterial group functions.xlsx")
+
+bacterial_group_functions <- lapply(excel_sheets, function(sheet) {
+  read_excel("./raw/Bacterial group functions.xlsx", sheet = sheet)
+})
+
+final_ibs_140_statistic <- read_excel("./raw/final_ibs_140_statistic.xlsx")
+final_health_statistic <- read_excel("./raw/final_health_statistic.xlsx")
+
+final_bacteria_health <- read.csv("./raw/final_bacteria_health.csv")
+final_bacteria_ibs_140 <- read.csv("./raw/final_bacteria_ibs_140.csv")
+
+```
+
+```{r}
+
+# Combining the _statistic and _bacteria dataframes:
+
+combined_statistic <- final_ibs_140_statistic %>%
+  full_join(final_health_statistic, by = intersect(names(final_ibs_140_statistic), names(final_health_statistic)))
+
+# Combining dataframes with bacteria data
+final_bacteria_combined <- rbind(final_bacteria_health, final_bacteria_ibs_140)
+
+```
+
+```{r}
+
+# Filtering data only about bacterial Genus
+
+genus_columns <- grep("_G$", names(final_bacteria_combined), value = TRUE)
+genus_data <- final_bacteria_combined[, c("patient_ID", genus_columns)]
+
+# Combining a dataset with combined_statistic
+genus_combined_data <- merge(combined_statistic, genus_data, by = "patient_ID")
+
+```
+
+```{r}
+
+# Adding information about the functions of bacteria (combining genus_combined_data with bacterial_group_functions)
+
+# "Патогены и нежелательные" + "Продуценты серотонина"
+combined_df <- merge(bacterial_group_functions[[1]], bacterial_group_functions[[2]], 
+                     by = c("TaxonName", "Rank"), all = TRUE)
+
+# +"Пробиотики" 
+bacterial_group_functions[[3]]$Probiotic <- TRUE
+combined_df_3 <- merge(combined_df, bacterial_group_functions[[3]], 
+                     by = c("TaxonName", "Rank"), all = TRUE)
+
+# +"Бактерии с особыми свойстами" 
+bacterial_group_functions[[4]]$Bacteria_with_special_properties<- TRUE
+combined_df_4 <- merge(combined_df_3, bacterial_group_functions[[4]], 
+                     by = c("TaxonName", "Rank"), all = TRUE)
+
+# +"Витаминные" 
+combined_df_5 <- merge(combined_df_4, bacterial_group_functions[[5]], 
+                     by = c("TaxonName", "Rank"), all = TRUE)
+
+# + "Продуценты КЦЖК"
+combined_df_6 <- merge(combined_df_5 , bacterial_group_functions[[6]], 
+                     by = c("TaxonName", "Rank"), all = TRUE)
+
+# + "Вредные привычки" 
+combined_bacterial_group_functions <- merge(combined_df_6 , bacterial_group_functions[[7]], 
+                     by = c("TaxonName", "Rank"), all = TRUE)
+
+```
+
+```{r}
+# Converting genus_combined_data to long format:
+
+genus_combined_data_long <- pivot_longer(
+    genus_combined_data,
+    cols = starts_with("X") | ends_with("_G"),
+    names_to = "TaxonName",
+    values_to = "TaxonAbundance"
+)
+
+# Remove the "_G" suffix from TaxonName
+genus_combined_data_long$TaxonName <- gsub("_G$", "", genus_combined_data_long$TaxonName)
+
+```
+
+Combining into the final dataset "final_combined_data_G" for working with data at the Genus taxonomic level:
+
+```{r}
+
+final_combined_data_G <- merge(
+    genus_combined_data_long, 
+    combined_bacterial_group_functions, 
+    by = "TaxonName", 
+    all.x = TRUE
+)
+
+```
+
+```{r}
+
+# Renaming column names
+ colnames(final_combined_data_G) <- c(
+    "Taxon_Name", "Patient_ID", "Research_ID", "Instrument",
+    "Isolation_Source", "Assay_Type", "Target_Gene", "Seq_Region",
+    "Seq_Date", "Health_State", "Main_Disease", "Birth_Year",
+    "Age", "Age_Min", "Age_Max", "Weight_kg", "Height_cm",
+    "BMI_Min", "BMI_Max", "Sex", "Country", "Race",
+    "Smoking", "Alcohol", "Antibiotics_Usage", "Social_Status",
+    "Physical_Activity", "Travel_Period", "Education_Level",
+    "Hygiene", "Pets_Type", "Sleep_Duration", "Weight_Min",
+    "Weight_Max", "Height_Min", "Height_Max", "Drugs", "Taxon_Abundance",
+    "Rank", "Bacteria_Category", "Inflammatory", "Oral",
+    "Gases", "Destroy", "Neuromediator", "Probiotic",
+    "Bacteria_Special_Properties", "Vitamin", "Acetate",
+    "Propionate", "Butyric_Acid", "Habbit", "Habit_State"
+)
+
+```
+
+## Data analysis
+
+# Search for Batch Effects
+
+Objective: To identify and correct for possible systematic differences between study groups.
+
+```{r}
+
+ggplot(final_combined_data_G, aes(x = Research_ID, y = Taxon_Abundance)) +
+  geom_boxplot(aes(fill = Research_ID), outlier.shape = NA) + 
+  geom_jitter(aes(color = Research_ID), width = 0.2, size = 1.5, alpha = 0.7) + 
+  scale_color_brewer(palette = "Dark2") +  
+  scale_fill_brewer(palette = "Dark2", name = "Research ID") +
+  labs(title = "Distribution of taxon percentages across Research_ID",
+       subtitle = "Each point represents the abundance of a taxon within a research category",
+       x = "Research ID",
+       y = "Taxon Abundance (%)",
+       color = "Research ID") + 
+  theme_bw() +
+  theme(legend.position = "right",
+        plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.title = element_text(face = "bold"))
+
+```
+
+
+
+To estimate the batch effect based on the number of unique taxa found in each study, we group the data by Research_ID. For each group, let's count the number of unique Taxon_Names. Let's compare the number of unique taxa between studies:
+
+```{r}
+
+# Calculate the count of unique taxa in each research
+unique_taxa_per_research <- final_combined_data_G %>%
+  group_by(Research_ID) %>%
+  summarise(Unique_Taxa_Count = n_distinct(Taxon_Name))
+
+# Visualization
+ggplot(unique_taxa_per_research, aes(x = Research_ID, y = Unique_Taxa_Count, fill = Research_ID)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = Unique_Taxa_Count), vjust = -0.3, size = 3.5) + 
+  scale_fill_brewer(palette = "Dark2") +  
+  theme_minimal() +
+  labs(title = "Count of Unique Taxa by Research",
+       x = "",
+       y = "Count of Unique Taxa",
+       fill = "Research ID") +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+
+The histogram shows that approximately the same number of unique taxa were identified in each study.
+
+To find differences in the percentages of taxa between studies, we use a nonparametric test - the Kruskal-Wallis test, for each taxon separately:
+
+```{r}
+
+# Function to perform the Kruskal-Wallis test for each taxon
+run_kruskal_test <- function(data) {
+  # The Kruskal-Wallis test is a non-parametric method used when the assumptions of ANOVA are not met
+  # It is used here to compare the 'Taxon_Abundance' across different 'Research_ID's within the provided data
+  kruskal.test(Taxon_Abundance ~ Research_ID, data = data)
+}
+
+# Group data by taxon and apply the Kruskal-Wallis test
+kruskal_results <- final_combined_data_G %>%
+  group_by(Taxon_Name) %>%
+  do(tidy(run_kruskal_test(.)))
+
+# Clean up the results to retain only the necessary columns
+kruskal_results <- kruskal_results %>%
+  ungroup() %>%
+  select(Taxon_Name, p.value) %>%
+  arrange(p.value)
+
+# Apply the Benjamini-Hochberg correction
+# This correction controls the False Discovery Rate when performing multiple comparisons
+kruskal_results_adjusted <- kruskal_results %>%
+  mutate(p.adjusted = p.adjust(p.value, method = "BH"))
+
+
+```
+
+
+
+
+Filtering taxa with p-value less than 0.05:
+
+```{r}
+
+significant_tax <- kruskal_results_adjusted %>%
+  filter(p.adjusted < 0.05)
+
+number_of_significant_tax <- nrow(significant_tax)
+
+# Output the number of significant taxa
+print(number_of_significant_tax)
+
+```
+
+```{r}
+
+significant_taxa <- kruskal_results_adjusted %>%
+  filter(p.adjusted < 0.05) %>%
+  pull(Taxon_Name)
+
+# Get a list of studies for each significant taxon
+research_ids_for_significant_taxa <- final_combined_data_G %>%
+  filter(Taxon_Name %in% significant_taxa) %>%
+  group_by(Taxon_Name) %>%
+  summarise(Research_IDs = list(unique(Research_ID)))
+
+```
+
+Here are all 6 studies. The batch effect is present.
+
+```{r}
+
+# Load necessary libraries
+library(wordcloud)
+library(dplyr)
+library(RColorBrewer)
+
+# Prepare your data as before
+top_taxa <- significant_tax %>%
+  arrange(p.adjusted) %>%
+  head(50)
+
+# Choose a color palette with more variety
+color_palette <- brewer.pal(5, "Set3")
+
+# Generate the word cloud with the new color palette
+wordcloud(words = top_taxa$Taxon_Name, freq = rep(1, nrow(top_taxa)), min.freq = 1,
+          scale = c(0.9, 0.9*2), random.order = FALSE, rot.per = 0.35,
+          colors = color_palette)
+
+```
+
+# Task 2. Determining the same (or not) distribution of samples for different categories (univariate analysis - the connection of each taxon with each factor, then the connection of each taxon with the factors in the population, and then the population with the population)
+
+```{r}
+
+# str(final_combined_data_G)
+
+```
+
+We begin with a one-way analysis using the Kruskal-Wallis test for each taxon in each category:
+
+
+```{r}
+
+# Transforming data to 'long format' for ease of analysis
+long_data <- final_combined_data_G %>%
+  gather(key = "Category", value = "Value", -c(Taxon_Name, Taxon_Abundance))
+
+# Function to perform the Kruskal-Wallis test
+run_kruskal <- function(data, cat) {
+  data %>%
+    filter(Category == cat) %>%
+    group_by(Taxon_Name) %>%
+    summarise(p_value = kruskal.test(Taxon_Abundance ~ Value)$p.value) %>%
+    mutate(Category = cat)
+}
+
+# List of categories to analyze
+categories <- c("Patient_ID")
+
+# Conducting the analysis for each category
+Patient_ID_results <- map_df(categories, ~run_kruskal(long_data, .x))
+
+# Adding Benjamini-Hochberg p-value adjustment for multiple testing
+# This correction controls the false discovery rate
+Patient_ID_results <- Patient_ID_results %>%
+  mutate(p_adjusted = p.adjust(p_value, method = "BH"))
+
+```
+
+```{r}
+
+# Histogram of p_adjusted values
+ggplot(Patient_ID_results, aes(x = p_adjusted)) +
+  geom_histogram(bins = 25, fill = 'blue', alpha = 0.7) + # Select the number of bins and color
+  geom_vline(aes(xintercept = 0.05), color = "red", linetype = "dashed", linewidth = 1) + # Significance level line
+  labs(title = "Kruskal-Wallis criterion p-value for Patient_ID by Taxon_Abundance",
+       x = "P-value",
+       y = "Frequency") +
+  theme_minimal()
+
+```
+
+```{r}
+
+# List of categories to analyze
+categories <- c("Health_State")
+
+Health_State_results <- map_df(categories, ~run_kruskal(long_data, .x))
+
+# Adding Benjamini-Hochberg p-value adjustment for multiple testing
+Health_State_results <- Health_State_results %>%
+  mutate(p_adjusted = p.adjust(p_value, method = "BH"))
+
+# Histogram of the adjusted p-values (p_adjusted)
+ggplot(Health_State_results, aes(x = p_adjusted)) +
+  geom_histogram(bins = 25, fill = 'blue', alpha = 0.7) +
+  geom_vline(aes(xintercept = 0.05), color = "red", linetype = "dashed", linewidth = 1) + # Significance level line
+  labs(title = "Kruskal-Wallis Test p-value for Health_State by Taxon_Abundance",
+       x = "Adjusted P-value",
+       y = "Frequency") +
+  theme_minimal()
+
+```
+
+
+```{r}
+
+# Load the openxlsx package
+library(openxlsx)
+
+# Write the dataframe to an Excel file
+write.xlsx(Health_State_results, file = "Health_State_results.xlsx")
+
+```
+
+```{r}
+
+significant_results_Health_State <- Health_State_results %>%
+  filter(p_value < 0.05)
+
+print(significant_results_Health_State)
+
+```
+
+
+
+```{r}
+
+categories <- c("Research_ID")
+
+Research_ID_results <- map_df(categories, ~run_kruskal(long_data, .x))
+
+Research_ID_results <- Research_ID_results %>%
+  mutate(p_adjusted = p.adjust(p_value, method = "BH"))
+
+# Histogram of the adjusted p-values (p_adjusted)
+ggplot(Research_ID_results, aes(x = p_adjusted)) +
+  geom_histogram(bins = 25, fill = 'blue', alpha = 0.7) + 
+  geom_vline(aes(xintercept = 0.05), color = "red", linetype = "dashed", linewidth = 1) + # Significance level line
+  labs(title = "Kruskal-Wallis Test p-value for Research_ID by Taxon_Abundance",
+       x = "Adjusted P-value",
+       y = "Frequency") + 
+  theme_minimal()
+
+```
+
+```{r}
+
+# List of categories to analyze
+categories <- c("Sex")
+
+# Conducting the analysis for each category
+Sex_results <- map_df(categories, ~run_kruskal(long_data, .x))
+
+# Adding Benjamini-Hochberg p-value adjustment for multiple testing
+# This correction controls the false discovery rate
+Sex_results <- Sex_results %>%
+  mutate(p_adjusted = p.adjust(p_value, method = "BH"))
+
+# Histogram of the adjusted p-values (p_adjusted)
+ggplot(Sex_results, aes(x = p_adjusted)) +
+  geom_histogram(bins = 25, fill = 'blue', alpha = 0.7) + 
+  geom_vline(aes(xintercept = 0.05), color = "red", linetype = "dashed", linewidth = 1) + # Significance level line
+  labs(title = "Kruskal-Wallis Test p-value for Sex by Taxon_Abundance",
+       x = "Adjusted P-value",
+       y = "Frequency") + 
+  theme_minimal()
+
+
+```
+
+
+```{r}
+
+categories <- c("Country")
+
+Country_results <- map_df(categories, ~run_kruskal(long_data, .x))
+
+ggplot(Country_results, aes(x = p_value)) +
+  geom_histogram(bins = 25, fill = 'blue', alpha = 0.7) + 
+  geom_vline(aes(xintercept = 0.05), color = "red", linetype = "dashed", linewidth = 1) +
+  labs(title = "Kruskal-Wallis Test p-value for Country by Taxon_Abundance",
+       x = "Adjusted P-value",
+       y = "Frequency") +
+  theme_minimal()
+
+```
+
+
+
+
+```{r, warning=FALSE}
+
+library(glmmTMB)
+library(dplyr)
+
+# Preparing data: converting categorical variables to factors
+final_combined_data_G$Health_State <- factor(final_combined_data_G$Health_State)
+
+# An empty list to save the results
+model_results <- list()
+
+# Loop through each taxon
+for(taxon in unique(final_combined_data_G$Taxon_Name)) {
+  # Filter data for the current taxon
+  taxon_data <- final_combined_data_G %>%
+    filter(Taxon_Name == taxon) %>%
+    drop_na(Health_State)
+  
+  # Check if there is a sufficient amount of data
+  if(nrow(taxon_data) > 10) {
+    # Fit the model using glmmTMB
+    model <- try(glmmTMB(Taxon_Abundance ~ Health_State + (1 | Research_ID),
+                         zi=~Health_State, # Zero-inflation part
+                         data = taxon_data), silent = TRUE)
+    
+    # Check for successful model fit
+    if(inherits(model, "glmmTMB")) {
+      model_results[[taxon]] <- summary(model)
+    } else {
+      model_results[[taxon]] <- model
+    }
+  }
+}
+
+# Print the first model result
+if(length(model_results) > 0 && inherits(model_results[[1]], "summary.glmmTMB")) {
+  print(model_results[[1]])
+} else {
+  print("No models were successfully fitted or the first model did not converge.")
+}
+
+```
+
+While the model has been fit to the data, the output indicates potential issues that need to be addressed. The lack of standard errors suggests that the model's assumptions may not be fully met, or there may be issues with data sparsity or separation. The interpretation of the fixed effects cannot be fully trusted without standard errors and corresponding p-values. Further diagnostic checks, potentially model reformulation, and investigation into the data are recommended before drawing any conclusions from this model.
+
+
+
+
+The goal is to evaluate how the presence of gas-producing bacteria (Gases) is associated with the constipative type of irritable bowel syndrome (Health_State$Disease). Let's try to take into account batch-effect at different levels.
+
+```{r}
+
+library(lme4)
+
+data_for_analysis <- final_combined_data_G[final_combined_data_G$Gases %in% c(1, NA) &
+                                           final_combined_data_G$Health_State %in% c("Disease", "Health"), ]
+
+data_for_analysis$Health_State <- as.factor(data_for_analysis$Health_State)
+
+# Convert the Gases variable into a factor (1 = presence, NA = absence)
+data_for_analysis$Gases <- factor(ifelse(is.na(data_for_analysis$Gases), 0, 1))
+
+# Preparing variables for the model
+data_for_analysis$Patient_ID <- as.factor(data_for_analysis$Patient_ID)
+data_for_analysis$Research_ID <- as.factor(data_for_analysis$Research_ID)
+
+# Create a generalized linear mixed model
+model_1 <- glmer(Health_State ~ Gases + (1 | Research_ID), 
+               data = data_for_analysis, family = binomial)
+
+summary(model_1)
+
+```
+
+
+
+
+# Boruta + Random Forest 
+
+```{r}
+
+# Prepare the data: selecting patient_ID and genus columns
+genus_data <- final_bacteria_combined[, c("patient_ID", genus_columns)]
+
+# Adding the Health_state variable
+# Patients with ID <= 210 are labeled as 0, otherwise 1
+genus_data$Health_state <- ifelse(as.numeric(sub("patient_", "", genus_data$patient_ID)) <= 210, 0, 1)
+
+# Remove the patient_ID column as it does not provide information for the analysis
+genus_data <- genus_data[, -which(names(genus_data) == "patient_ID")]
+
+# Apply Boruta for feature selection
+set.seed(123) # Set a random seed for reproducibility
+boruta_output <- Boruta(Health_state ~ ., data = genus_data, ntree = 500, maxRuns = 500)
+
+# View results
+print(boruta_output)
+
+# Get attribute statistics
+boruta_stats <- attStats(boruta_output)
+
+# Visualization of all variables
+all_vars <- boruta_stats %>%
+  tibble::rownames_to_column(var = "Variable") %>%
+  mutate(Variable = reorder(Variable, meanImp))
+
+# Plotting the results
+ggplot(all_vars, aes(x = Variable, y = meanImp, color = decision)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = minImp, ymax = maxImp, width = 0.1)) +
+  coord_flip() +
+  xlab("Average Decrease in Entropy") +
+  ylab("Variables") +
+  labs(color = "Significance of Variable") +
+  theme(legend.position = "bottom")
+
+```
+
+```{r}
+
+top_n <- 20
+
+top_vars <- all_vars %>%
+  top_n(top_n, wt = meanImp)
+
+ggplot(top_vars, aes(x = Variable, y = meanImp, color = decision)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = minImp, ymax = maxImp, width = 0.1)) +
+  coord_flip() +
+  xlab("Average Importance") +
+  ylab("Variables") +
+  labs(color = "Variable Significance") +
+  theme(
+    legend.position = "bottom",
+    axis.text.y = element_text(size = 5)
+  )
+
+```
+
+
+
+```{r}
+
+confirmed_vars <- all_vars %>%
+  filter(decision == 'Confirmed')
+
+ggplot(confirmed_vars, aes(x = Variable, y = meanImp, color = decision)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = minImp, ymax = maxImp, width = 0.1)) +
+  coord_flip() +
+  xlab("Average Importance") +
+  ylab("Variables") +
+  labs(color = "Variable Significance") +
+  theme(
+    legend.position = "none",
+    axis.text.y = element_text(size = 5)
+  )
+
+ggsave("confirmed_boruta_plot.png", width = 12, height = 10)
+
+```
+
+
+Random forest:
+
+```{r}
+
+install.packages("randomForest")
+
+library(caret)
+library(randomForest)
+if (!require("pROC")) install.packages("pROC")
+library(pROC)
+
+
+# Step 1: Data Preparation
+set.seed(123)
+confirmed_vars_names <- names(genus_data)[names(genus_data) %in% confirmed_vars$Variable]
+data_confirmed <- genus_data[, c(confirmed_vars_names, "Health_state")]
+training_index <- createDataPartition(data_confirmed$Health_state, p = 0.8, list = FALSE)
+training_set <- data_confirmed[training_index, ]
+test_set <- data_confirmed[-training_index, ]
+
+# Convert Health_state into a factor in the training and test sets
+training_set$Health_state <- factor(training_set$Health_state, levels = c(0, 1))
+test_set$Health_state <- factor(test_set$Health_state, levels = c(0, 1))
+
+# Train a random forest model for classification
+model <- randomForest(Health_state ~ ., data = training_set, ntree = 500)
+
+# Predicting the probabilities of a class with label 1 on the test set
+prob_predictions <- predict(model, test_set[-which(names(test_set) == "Health_state")], type = "prob")
+
+# Calculate ROC-AUC
+roc_results <- roc(response = test_set$Health_state, predictor = prob_predictions[,2])
+print(auc(roc_results))
+roc_plot <- roc(response = test_set$Health_state, predictor = prob_predictions[,2])
+
+plot(roc_plot, main="ROC Curve", col="#1c61b6", lwd=2)
+abline(a=0, b=1, lty=2, col="gray")
+text(0.6, 0.2, paste("AUC = ", round(auc(roc_plot), 4)), cex = 1.2)
+
+ggsave("ROC_Curve.png", width = 8, height = 6)
+
+```
+
+
+```{r}
+# Calculate class predictions on the test set
+class_predictions <- predict(model, test_set[-which(names(test_set) == "Health_state")])
+
+# Creating an error matrix and displaying basic metrics
+conf_matrix <- confusionMatrix(class_predictions, test_set$Health_state)
+
+print(conf_matrix)
+
+```
+
+The ROC curve shows an AUC of 0.9986, which is exceptionally high and might indicate a potential issue with the model, such as a batch effect.
+
+
+
+# Clustering 
+
+```{r}
+if (!require("umap")) install.packages("umap")
+library(umap)
+
+```
+```{r}
+set.seed(42) # Установка начального числа для воспроизводимости
+umap_result <- umap(genus_data[, -which(names(genus_data) == "patient_ID")])
+
+```
+
+
+```{r}
+library(ggplot2)
+umap_df <- as.data.frame(umap_result$layout)
+colnames(umap_df) <- c("UMAP1", "UMAP2")
+umap_df$cluster <- as.factor(kmeans(umap_df, centers = 6)$cluster)
+
+ggplot(umap_df, aes(x = UMAP1, y = UMAP2, color = cluster)) +
+  geom_point(alpha = 0.8) +
+  theme_minimal() +
+  labs(title = "UMAP Clustering", x = "UMAP Dimension 1", y = "UMAP Dimension 2", color = "Cluster")
+
+```
+
+
+```{r, message=FALSE}
+
+if (!require("umap")) install.packages("umap")
+if (!require("plotly")) install.packages("plotly")
+library(umap)
+library(plotly)
+
+```
+
+```{r}
+umap_result_3d <- umap(genus_data[, -which(names(genus_data) == "patient_ID")], n_components = 6)
+
+```
+
+```{r}
+umap_df_3d <- as.data.frame(umap_result_3d$layout)
+colnames(umap_df_3d) <- c("UMAP1", "UMAP2", "UMAP3")
+umap_df_3d$cluster <- as.factor(kmeans(umap_df_3d, centers = 6)$cluster)
+
+```
+
+```{r}
+plot_ly(umap_df_3d, x = ~UMAP1, y = ~UMAP2, z = ~UMAP3, color = ~cluster, colors = c('#FFA07A', '#20B2AA', '#778899'), marker = list(size = 5)) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'Component 1'),
+                      yaxis = list(title = 'Component 2'),
+                      zaxis = list(title = 'Component 3')),
+         title = "3D UMAP Clustering of genus_data")
+
+```
+
+
+
+
+
+```{r}
+plot_ly(umap_with_metadata, x = ~UMAP1, y = ~UMAP2, z = ~UMAP3, color = ~Health_state, colors = c('#FFA07A', '#20B2AA', '#778899'), marker = list(size = 5)) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'Component 1'),
+                      yaxis = list(title = 'Component 2'),
+                      zaxis = list(title = 'Component 3')),
+         title = "3D UMAP Clustering of genus_data")
+```
