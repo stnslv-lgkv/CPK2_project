@@ -1,0 +1,838 @@
+---
+title: "CPK2_Family"
+author: "Stanislav Legkovoy"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(tidymodels)
+library(glmnet)
+library(Matrix)
+library(wordcloud)
+library(ggcorrplot)
+library(embed)
+library(themis)
+library(psych)
+library(yardstick)
+library(vip)
+library(Boruta)
+library(glmmTMB)
+library(rpart)
+library(uwot)
+library(plotly)
+library(cluster)
+library(flexclust)
+library(factoextra)
+library(rattle)
+library(brunnermunzel)
+```
+
+
+## Input data
+```{r data}
+
+#Bacterial group functions
+
+dt_vec <- c(NULL)
+
+for (i in 1:7) {
+  suf <- paste0("bac_gr_funcs", i)
+  dt_vec <<- append(suf, dt_vec)
+  assign(suf, openxlsx::read.xlsx("./data/Bacterial group functions.xlsx", sheet = i))
+}
+  
+  for (dt in dt_vec) {
+    tmp <- get(dt)
+    tmp <- filter(tmp, Rank=="F")
+    assign(dt, tmp)
+  }
+
+rm(tmp)
+  
+  fbh <- read.csv("./data/final_bacteria_health.csv")                           #final_bacteria_health
+  fb140 <- read.csv("./data/final_bacteria_ibs_140.csv")                        #final_bacteria_ibs_140
+  
+  fbh_stats <- openxlsx::read.xlsx("./data/final_health_statistic.xlsx")        #final_health_statistic
+  fb140_stats <- openxlsx::read.xlsx("./data/final_ibs_140_statistic.xlsx")     #final_ibs_140_statistic
+
+```
+
+
+## Custom funcs
+
+```{r funcs}
+
+pivot_long_foo <- function(dt){
+    dt %>% 
+      pivot_longer(
+        cols = X01D2Z36_F:possible.genus.03_G,
+        names_to = "Bacteria_tax",
+        values_to = "TaxonAbun"
+      )
+}
+  
+run_wilcox <- function(dat ,cat) {
+    dat %>% 
+      filter(Category == cat) %>% 
+      group_by(TaxonName) %>% 
+      summarise(p.value = wilcox.test(TaxonAbun ~ Value)$p.value) %>%
+      mutate(Category = cat)
+} 
+
+run_kruskal <- function(dat ,cat) {
+    dat %>% 
+      filter(Category == cat) %>% 
+      group_by(TaxonName) %>% 
+      summarise(p.value = kruskal.test(TaxonAbun ~ Value)$p.value) %>%
+      mutate(Category = cat)
+} 
+
+NA_count_foo <- function(dt) {
+  dt %>%
+    mutate(n = n()) %>%
+    summarise(across(everything(), ~ sum(is.na(.x))),
+              n = n()) %>%
+    select(n, where(function(x) x != 0)) %>%
+    mutate(across(everything()), round(. / n, 4)) %>%
+    select(-n) %>%
+    pivot_longer(
+      cols = everything(),
+      names_to = "Feature",
+      values_to = "Value"
+    ) %>%
+    arrange(desc(Value))
+}
+
+```
+
+## Data processing, step 1
+
+### 'bac_gr_funcs' dataset 
+
+```{r processing1, echo=FALSE}
+
+### Pathogenic and opportunistic bacteria
+  bac_gr_funcs1 <- bac_gr_funcs1 %>% 
+    mutate(Inflammatory = coalesce(Inflammatory, 0),
+           Oral = coalesce(Oral, 0),
+           Gases = coalesce(Gases, 0),
+           TaxonName = gsub(" ", "_", TaxonName),
+           Bacteria_tax = paste(TaxonName, Rank, sep = "_"),
+           PATHFL = "Y") %>% 
+    select(-Rank) 
+
+### Serotonin producers
+  bac_gr_funcs2 <- bac_gr_funcs2 %>% mutate(Destroy = coalesce(Destroy, 0),
+                                            SERFL = "Y") %>% select(-Rank)
+### Probiotics
+  # bac_gr_funcs3 <-
+  
+### Bacteria with special characteristics
+  bac_gr_funcs4 <- bac_gr_funcs4 %>% mutate(SPFL = "Y") %>% select(-Rank)
+  
+### Vitaminous
+  # bac_gr_funcs5 <- 
+
+### SCFA producers
+  bac_gr_funcs6 <- bac_gr_funcs6 %>% mutate(FAFL = "Y") %>% select(-Rank)
+  bac_gr_funcs6 <- rows_append(bac_gr_funcs6, 
+                     tibble(TaxonName = "Ruminococcaceae", 
+                     `Ацетат` = 0,
+                     `Пропионат` = 0, 
+                     Масляная.кислота = 1, 
+                     FAFL = "Y"))
+  bac_gr_funcs6 <- bac_gr_funcs6 %>% mutate(TaxonName = gsub("\\(.*\\)", "", TaxonName))
+  bac_gr_funcs7 <- bac_gr_funcs7 %>% mutate(CMFL = "Y") %>% select(-Rank)
+  
+### Unhealthy habits  
+  bac_gr_funcs7 <- bac_gr_funcs7 %>% pivot_wider(names_from = Habbit, values_from = Habit_state)
+
+```
+
+### 'fb140/fb140_stats/fbh/fbh_stats' dataset 
+
+```{r processing2}
+
+## make dts long
+
+  fb140_long <- pivot_long_foo(fb140)
+  fbh_long <- pivot_long_foo(fbh)
+
+## merge dts(fb40_long/fbh_long with corresponding stats dts)
+
+  fb140_mrg <- fb140_long %>% 
+    inner_join(fb140_stats, by="patient_ID") 
+  
+  fbh_mrg <- fbh_long %>% 
+    inner_join(fbh_stats, by="patient_ID") 
+  
+## set fb40/fbh dts together 
+
+  fb_long <- bind_rows(fbh_mrg, fb140_mrg) %>% 
+    mutate(Rank = str_split_i(Bacteria_tax, "_", 2)) %>%
+    filter(Rank == "F")
+  
+```
+
+### Final merge of all dts 
+
+```{r merge}
+
+  fb_long. <- fb_long %>% 
+    left_join(bac_gr_funcs1, by="Bacteria_tax") %>% 
+    mutate(TaxonName = str_split_i(Bacteria_tax, "_", 1)) 
+
+  fb_all0 <- plyr::join_all(list(fb_long., bac_gr_funcs2, bac_gr_funcs4, bac_gr_funcs6, bac_gr_funcs7),
+                                by="TaxonName",
+                                type="left")
+
+```
+
+## Data processing, step 2
+
+```{r processing3}
+
+ fb_all0 %>%
+   map(function(x) sum(is.na(x)) / length(x)) %>%
+   enframe() %>%
+   unnest(cols = value) %>%
+   arrange(desc(value)) %>% 
+   filter(name != "Age" & value > 0.26) %>% 
+   select(name) %>% 
+   pull() -> NA_cols
+
+  NA_count_foo(fb_all0)
+
+  fb_all0.1 <- fb_all0 %>% 
+    select(- NA_cols) %>% 
+    select(-c("Instrument", "Isolation_source", "Assay_type", "Target_gene", "Rank")) %>% #remove cols with constant value
+    mutate(Age_min_max = if_else(!is.na(Age_min), paste(Age_min, Age_max, sep="-"), NA_character_))
+ 
+# sex among researches  
+  
+  fb_all0.1 %>% 
+    filter(Sex %in% c("male", "female")) %>%
+    group_by(research_ID, Sex) %>% 
+    dplyr::summarise(sumPct = sum(TaxonAbun)) %>%
+    ggplot(aes(x=research_ID, y=sumPct, fill=Sex))+
+    geom_bar(position="dodge", stat="identity")
+
+# country among researches  
+
+  fb_all0.1 %>% 
+    group_by(research_ID, Country) %>% 
+    dplyr::summarise(sumPct = sum(TaxonAbun)) %>%
+    ggplot(aes(x=research_ID, y=sumPct, fill=Country))+
+    geom_bar(position="dodge", stat="identity")
+
+# derive dummy cols    
+  
+  fb_all1 <- fb_all0.1 %>% 
+    mutate(SexUniFL = 
+             case_when(research_ID %in% c("research_1", "research_4") ~ 1,
+                       research_ID %in% c("research_2", "research_3") ~ 0,
+                       .default = NA),
+           CountryUniFL = 
+             case_when(research_ID == "research_3" ~ 0,
+                       .default = 1),
+           YouthFL = 
+             case_when(!is.na(Age) & between(Age, 15, 24) ~ 1,  
+                        is.na(Age) & Age_min_max %in% c("16-42", "18-40", "21-43", "23-28") ~ 1,
+                      .default = 0),
+           AdultFL = 
+             case_when(!is.na(Age) & between(Age, 25, 64) ~ 1,  
+                       is.na(Age) & Age_min_max %in% c("16-42", "18-40", "21-43", "23-28", "28-50") ~ 1,
+                       .default = 0),
+           SeniorFL = 
+             case_when(!is.na(Age) & Age >= 65 ~ 1,  
+                       .default = 0),
+           OneSeqRegionFL = ifelse(stringr::str_detect(Seq_region, "-"), 0, 1))
+
+```
+
+```{r graphs, fig.height=6, fig.width=7, warning=F}
+
+# unique taxons 
+  
+fb_all1 %>% 
+  group_by(research_ID) %>% 
+  distinct(TaxonName) -> uniqTax 
+
+ggplot(data=fb_all1, aes(x=research_ID, y=TaxonAbun, color=research_ID, shape=Health_state))+
+  geom_boxplot(outlier.shape = NA)+
+  geom_jitter()+
+  ggtitle("Distribution of taxon percentages across Research_ID") +
+  labs(y = "Taxon Abundance (%)", x="Research_ID")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  guides(colour = "none")
+
+# ggsave(filename = file.path("pics","fig1_family.png"))
+
+ggplot(data=uniqTax, aes(x=research_ID, fill=research_ID)) +
+  geom_bar()+
+  geom_text(stat='count', aes(label=..count..), vjust=-1) +
+  ggtitle("Count of unique taxa by Research_ID") +
+  labs(y = "Count of unique taxa", x="Research_ID")+
+  theme(legend.position = "None", plot.title = element_text(hjust = 0.5))
+
+# ggsave(filename = file.path("pics","fig2_family.png"))
+
+```
+
+## Analysis
+
+### Gas-producing bacteria
+
+```{r gas}
+
+  gazbac <- bac_gr_funcs1 %>% filter(Gases == 1) %>% select(TaxonName) %>%  pull()
+
+  fb_all1.gas <- fb_all1 %>% 
+    filter(TaxonName == gazbac) %>% 
+    mutate(DISFL = if_else(Health_state == "Health", 0, 1)) %>% 
+    select(patient_ID, research_ID, Health_state, DISFL, TaxonAbun)
+  
+  ggplot(data=fb_all1.gas, aes(x=Health_state, y=TaxonAbun, fill=Health_state)) +
+    geom_boxplot(outlier.shape = NA)+
+    geom_jitter() +
+    labs(x="Health state", y="Taxon Abundance (%)") +  
+    ggtitle("Veillonellaceae distribution among Health state") +
+    theme(legend.position = "None", plot.title = element_text(hjust = 0.5))
+  ggsave(filename = file.path("pics","fig2.5_family.png"))
+           
+    rstatix::wilcox_test(TaxonAbun ~ DISFL, data = fb_all1.gas) %>%   flextable::flextable() %>% flextable::theme_box()
+  
+  logit1 <- glm(DISFL ~ TaxonAbun, family = "binomial", data = fb_all1.gas)
+  summary(logit1)
+  
+  broom::tidy(logit1) %>% 
+    mutate(exp_estimate = exp(estimate),
+           p.value = round(p.value, 4)) %>% 
+    relocate(exp_estimate, .after = estimate) %>%
+    mutate(across(where(is.numeric), function(x) x %>% round(., 4))) %>% 
+    flextable::flextable() %>% 
+    flextable::theme_box()
+    
+
+  ggplot(data=fb_all1.gas, aes(y = DISFL, x = TaxonAbun))+
+    geom_point(alpha=.5)+
+    stat_smooth(method = "glm", method.args = list(family="binomial"), se = FALSE, color="navy") + 
+    labs(x="Taxon Abundance (%)", y="DiseaseFL") +  
+    ggtitle("Veillonellaceae") +
+    theme(plot.title = element_text(hjust = 0.5))
+  
+# ggsave(filename = file.path("pics","fig3_family.png"))
+
+```
+#### Brunner-Munzel
+
+```{r brunnermunzel}
+
+broom::tidy(brunnermunzel.test(TaxonAbun ~ DISFL, data = fb_all1.gas)) %>% 
+  flextable::flextable() %>% flextable::theme_box()
+
+```
+
+
+### Wordcloud
+#### Sex
+
+```{r wordcloud-sex}
+
+  fb_all1.sex <- fb_all1 %>% filter(Sex %in% c("female", "male"))
+  fb_all1.sex_long <- fb_all1.sex %>% gather(key = "Category", value = "Value", -c(TaxonName, TaxonAbun))
+
+  map_df("Sex", ~run_wilcox(fb_all1.sex_long, .x)) %>%
+    mutate(p.adj = p.adjust(p.value, method = "BH")) %>%
+    filter(!is.na(p.adj) & p.adj < 0.05) %>%
+    arrange(Category, p.adj) -> rslts.sex 
+  
+  showbac.sex <- fb_all1.sex %>%
+    filter(TaxonName %in% rslts.sex$TaxonName) %>% 
+    select(TaxonAbun, TaxonName, Sex) %>% 
+    group_by(Sex, TaxonName) %>% 
+    summarise(meanTaxonAbun = mean(TaxonAbun)*100) %>% 
+    filter(meanTaxonAbun > 0) %>% 
+    arrange(meanTaxonAbun) %>% 
+    filter(meanTaxonAbun > quantile(meanTaxonAbun, 0.05) & meanTaxonAbun < quantile(meanTaxonAbun, 0.95)) %>% 
+    ungroup() %>% 
+    rename(word = TaxonName, freq = meanTaxonAbun) %>% 
+    mutate(freq = ceiling(freq)) 
+  
+  showbac.sex_m <- showbac.sex %>%
+    filter(Sex == "male") %>%
+    select(-Sex) %>% 
+    arrange(desc(freq)) %>% 
+    as.data.frame()
+  
+  showbac.sex_f <- showbac.sex %>%
+    filter(Sex == "female") %>%
+    select(-Sex) %>% 
+    arrange(desc(freq)) %>% 
+    as.data.frame()
+  
+  # jpeg(file="./pics/fig4_family.jpeg", width=800, height=800)
+  wordcloud(words = showbac.sex_m$word, freq = showbac.sex_m$freq, min.freq = 1,
+          max.words=35, random.order=FALSE, rot.per=0.35,
+          colors=brewer.pal(8, "Dark2"), scale=c(6, .9))
+  # dev.off()
+  
+  # jpeg(file="./pics/fig5_family.jpeg", width=800, height=800)
+  wordcloud(words = showbac.sex_f$word, freq = showbac.sex_f$freq, min.freq = 1,
+          max.words=35, random.order=FALSE, rot.per=0.35, 
+          colors=brewer.pal(8, "Dark2"), scale=c(8, .9))
+  # dev.off()
+
+```
+
+#### HealthState
+
+```{r wordcloud-health-state}
+  
+  fb_all1.hs <- fb_all1
+  fb_all1.hs_long <- fb_all1.hs %>% gather(key = "Category", value = "Value", -c(TaxonName, TaxonAbun))
+
+  map_df("Health_state", ~run_wilcox(fb_all1.hs_long, .x)) %>%
+    mutate(p.adj = p.adjust(p.value, method = "BH")) %>%
+    filter(!is.na(p.adj) & p.adj < 0.05) %>%
+    arrange(Category, p.adj) -> rslts.hs
+
+  showbac.hs <- fb_all1.hs %>%
+    filter(TaxonName %in% rslts.hs$TaxonName) %>%
+    select(TaxonAbun, TaxonName, Health_state) %>%
+    group_by(Health_state, TaxonName) %>%
+    summarise(meanTaxonAbun = mean(TaxonAbun)*100) %>%
+    filter(meanTaxonAbun > 0) %>%
+    arrange(meanTaxonAbun) %>%
+    filter(meanTaxonAbun > quantile(meanTaxonAbun, 0.05) & meanTaxonAbun < quantile(meanTaxonAbun, 0.95)) %>%
+    ungroup() %>% 
+    rename(word = TaxonName, freq = meanTaxonAbun) %>% 
+    mutate(freq = ceiling(freq)) 
+  
+  showbac.hs_h <- showbac.hs %>%
+    filter(Health_state == "Health") %>%
+    select(-Health_state) %>% 
+    arrange(desc(freq)) %>% 
+    as.data.frame()
+  
+  showbac.hs_d <- showbac.hs %>%
+    filter(Health_state == "Disease") %>%
+    select(-Health_state) %>% 
+    arrange(desc(freq)) %>% 
+    as.data.frame()
+  
+  # jpeg(file="./pics/fig6_family.jpeg", width=800, height=800)
+  wordcloud(words = showbac.hs_h$word, freq = showbac.hs_h$freq, min.freq = 1,
+          max.words=35, random.order=FALSE, rot.per=0.35, 
+          colors=brewer.pal(8, "Dark2"), scale=c(6, .9))
+  # dev.off()
+  
+  # jpeg(file="./pics/fig7_family.jpeg", width=800, height=800)
+  wordcloud(words = showbac.hs_d$word, freq = showbac.hs_d$freq, min.freq = 1,
+          max.words=35, random.order=FALSE, rot.per=0.35, 
+          colors=brewer.pal(8, "Dark2"), scale=c(6, .9))
+  # dev.off()
+  
+```
+
+<!-- ### Mixed effects -->
+<!-- #### research_ID -->
+
+```{r}
+# 
+# fb_all1.mix <- fb_all1 %>% 
+#     mutate(across(c(Sex, patient_ID, research_ID, 
+#                     TaxonName, Health_state), function(x) x %>% factor()))
+
+# fb_all1.mix <- fb_all1 %>% 
+#      mutate(research_ID = factor(research_ID), 
+#             TaxonAbun_d100 = TaxonAbun/100)
+# 
+#  mod_rslts.resID <- list()
+# 
+#   for(taxon in unique(fb_all1.mix$TaxonName)) {
+#     
+#     taxon_data <- fb_all1.mix %>% filter(TaxonName == taxon) 
+#     
+#     if (sum(taxon_data$TaxonAbun_d100) > 0) {
+#       model <- glmmTMB(TaxonAbun_d100 ~ research_ID + (1 | research_ID), data = taxon_data,
+#                        family = beta_family(link="logit"),  zi=~1 )
+#       mod_rslts.resID[[taxon]] <- summary(model)
+#     }
+#   }
+ 
+```
+
+## ML (random forest)
+
+### preprocessing
+
+```{r processing4}
+
+cpk2_raw0 <- fb_all1 
+
+cpk2_raw0 %>% glimpse()
+
+cpk2_raw1 <- cpk2_raw0 %>% 
+  select(-c("Age", "Age_min", "Age_max", "Age_min_max", "Seq_date", 
+            "Sex", "SexUniFL", "AdultFL", "SeniorFL", "Bacteria_tax", "Country",
+            "CountryUniFL", "Seq_region"))
+
+cpk2.1 <- cpk2_raw1 %>% 
+  select(patient_ID, research_ID, TaxonName, TaxonAbun) %>% 
+  pivot_wider(names_from = TaxonName, values_from = TaxonAbun)
+
+cpk2.2 <- cpk2_raw1 %>% 
+  select(-TaxonName, -TaxonAbun) %>% 
+  distinct()
+
+cpk2.2 %>% 
+  inner_join(cpk2.1, by = join_by(patient_ID, research_ID)) %>% 
+  mutate(across(ends_with("FL"), function(x) x %>% factor(levels = c("0", "1"))),
+         HasDiseaseFL = factor(ifelse(Health_state == "Disease", 1, 0), levels=c("0", "1"))) %>% 
+  relocate(HasDiseaseFL) -> cpk2.2.5
+
+cpk2.2.5 %>% 
+  select(-patient_ID, -Health_state) -> cpk2.3
+
+```
+
+### Clustering (Partitioning Around Medoids, variable = research_ID) 
+
+```{r cluster}
+
+cpk2.2.5 %>% select(-patient_ID, -Health_state, -HasDiseaseFL, -YouthFL, -OneSeqRegionFL) -> cpk_clust     #research_ID, HasDiseaseFL
+
+# cpk2.2.5 %>% select(-patient_ID, -Health_state) -> cpk_clust     
+#options = research_ID, HasDiseaseFL
+
+cpk_clust.1 <- cpk_clust[,-1] %>% select_if(colSums(.) != 0)
+
+fit.pam <- pam(cpk_clust.1, k=6, stand = F, metric = "manhattan")
+
+ct.pam <- table(cpk_clust$research_ID, fit.pam$clustering)
+# ct.pam
+
+randIndex(ct.pam) # adjusted Rand index
+
+fviz_cluster(fit.pam, data=cpk_clust.1)
+# ggsave(filename = file.path("pics","fig8_family.png"))
+```
+
+### Boruta
+
+```{r boruta}
+
+# NA_count_foo(cpk2.3)
+
+cpk2.3 <- cpk2.3 %>% select(-research_ID)
+
+Boruta(HasDiseaseFL ~ ., cpk2.3, ntree = 500, maxRuns = 500) %>%
+  TentativeRoughFix() -> boruta_trained
+
+boruta.sig.vars <- boruta_trained %>%
+  attStats() %>%
+  filter(decision == "Confirmed" & meanImp > 5) %>% 
+  arrange(desc(meanImp)) %>% 
+  rownames_to_column(var = "ImpVar") %>% 
+  select(ImpVar) %>% 
+  pull()
+
+boruta_trained %>%
+  attStats() %>%
+  filter(decision == "Confirmed") %>%  
+  rownames_to_column("Variable") %>%
+  mutate(Variable = Variable %>% fct_reorder(`meanImp`)) %>%
+  
+  ggplot(aes(y = Variable, x = meanImp, colour = decision)) +
+  geom_point() +
+  geom_errorbar(aes(xmin = minImp, xmax = maxImp, width = 0.1)) +
+  xlab("Entropy mean reduction") +
+  labs(color = "Variable significance") +
+  theme(legend.position = "bottom")
+  # ggsave(filename = file.path("pics","fig9_family.png"), dpi = 300)
+
+```
+
+### make train/test dts
+
+```{r train-test, warning=F}
+
+cpk2.4 <- cpk2.3[sample(nrow(cpk2.3)), ]
+
+cpk2 <- cpk2.4 %>% select(HasDiseaseFL, boruta.sig.vars)
+
+split_train_test <- initial_split(cpk2, strata = HasDiseaseFL, prop = 0.80)
+
+cpk2_train <- split_train_test %>% training()
+cpk2_test <- split_train_test %>% testing()
+
+```
+
+### Corrplot
+
+```{r, fig.width=10, fig.height=10}
+
+cpk2 %>%
+  select(where(is.numeric) & !HasDiseaseFL) %>%
+  corr.test() %>%
+  .$r %>%
+  ggcorrplot(lab = TRUE)
+
+```
+
+### Recipe
+
+#### Recipe, step1
+
+```{r recipe1}
+
+cat_metric <- yardstick::metric_set(
+  
+    yardstick::bal_accuracy,
+    yardstick::precision,
+    yardstick::recall,
+    yardstick::f_meas,
+    yardstick::sensitivity,
+    yardstick::specificity,
+    yardstick::j_index
+  
+  )
+
+```
+
+#### Recipe, step2
+
+```{r recipe2}
+
+# cpk2_recipe <- recipe(HasDiseaseFL ~ ., cpk2_train) %>%
+#   step_zv(all_predictors()) %>%                   #zero variance vars 
+#   step_nzv(all_predictors()) %>%                  #non-balanced vars
+#   step_lincomb(all_numeric_predictors()) %>%      #linear combinations (with high correlation coef)
+#   # step_normalize(all_numeric_predictors()) %>%
+#   step_lencode_glm(all_nominal_predictors(), outcome = vars(HasDiseaseFL)) %>% #target encoding
+#   step_adasyn(HasDiseaseFL)  %>%               #compensation of Disease/Health disbalance
+#   prep()
+# 
+# cpk2_recipe %>% juice() %>% count(HasDiseaseFL)
+# cpk2_train %>% count(HasDiseaseFL)
+ 
+cpk2_recipe <- recipe(HasDiseaseFL ~ ., cpk2_train) %>%
+  step_zv(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_lincomb(all_numeric_predictors()) %>%
+  step_lencode_glm(all_nominal_predictors(), outcome = vars(HasDiseaseFL)) %>%
+  step_adasyn(HasDiseaseFL) #%>%
+  #prep()
+```
+
+### Model definition
+
+```{r define-model}
+rf_model <- rand_forest(mode = "classification", mtry = tune(), trees = tune(), min_n = tune()) %>%
+  set_engine("ranger")
+```
+
+### Sample definition
+
+```{r define-sample}
+cv_samples <- vfold_cv(cpk2_train, strata = HasDiseaseFL, v = 5)
+```
+
+### Parameter grid definition
+
+```{r define-param-grid}
+parameters_grid <- grid_max_entropy(mtry(range = c(5, 12)), trees(), min_n(), size = 20)
+```
+
+### Pipeline definition
+
+```{r define-pipe}
+
+reg_workflow <- workflow() %>%
+  add_recipe(cpk2_recipe) %>%
+  add_model(rf_model)
+
+```
+
+### Model training
+
+```{r train-model}
+
+grid_search <- reg_workflow %>%
+  
+  tune_grid(
+    
+    object = reg_workflow,
+    resamples = cv_samples,
+    grid = parameters_grid,
+    control = control_grid(save_pred = TRUE),
+
+    metrics = metric_set(sensitivity, specificity, j_index)
+
+  )
+
+```
+
+### Visualization
+
+```{r visualize-model}
+
+grid_search %>%
+  collect_metrics() %>%
+  ggplot(aes(trees, mean, color = .metric)) +
+  geom_errorbar(aes(ymin = mean - std_err, ymax = mean + std_err), alpha = 0.8) +
+  geom_line(size = 1)
+
+```
+
+### Best model choice
+
+```{r best-model}
+
+best_by_j_index <- grid_search %>% select_best("j_index")
+
+# best_by_j_index %>%   flextable::flextable() %>% flextable::theme_box()
+
+final_reg_model <- finalize_workflow(
+  
+  reg_workflow,
+  best_by_j_index
+  
+)
+
+```
+
+## Compare metrics on test and train data
+
+```{r metrics-compare}
+# test data
+
+final_reg_model %>%
+  keras::fit(cpk2_train) %>%
+  predict(cpk2_test) %>%
+  pull() -> final_test_prediction
+
+metrics_on_test <- cat_metric(truth = truth_values, estimate = estimate_values, tibble(truth_values = cpk2_test$HasDiseaseFL, estimate_values = final_test_prediction)) %>% rename(test_estimate = `.estimate`) %>% select(!`.estimator`)
+
+# train data
+
+final_reg_model %>%
+  keras::fit(cpk2_train) %>%
+  predict(cpk2_train) %>%
+  pull() -> final_train_prediction
+
+metrics_on_train <- cat_metric(truth = truth_values, estimate = estimate_values, tibble(truth_values = cpk2_train$HasDiseaseFL, estimate_values = final_train_prediction)) %>% rename(train_estimate = `.estimate`) %>% select(!`.estimator`)
+
+# binding
+
+metrics_on_test %>%
+  left_join(metrics_on_train, by = ".metric") %>%
+  mutate(differencies = train_estimate - test_estimate) %>% 
+  # write.csv(.,file = "./output/metrics.csv")
+  flextable::flextable() %>% flextable::theme_box()
+```
+
+### Final estimation
+
+```{r final-estimation}
+
+last_fit(
+  
+  final_reg_model,
+  split_train_test
+  
+) -> final_log_model_all_data
+
+final_log_model_all_data %>%
+  extract_workflow() %>%
+  predict(cpk2, type = "class") %>%
+  pull() -> class_prediction
+
+final_log_model_all_data %>%
+  extract_workflow() %>%
+  predict(cpk2, type = "prob") %>%
+  pull() -> prob_prediction
+
+log_model_results <- tibble(truth = cpk2$HasDiseaseFL,
+                            estimate = class_prediction,
+                            prob_yes = 1 - prob_prediction)
+
+cat_metric(truth = truth, estimate = estimate, log_model_results) 
+
+log_model_results %>%
+  roc_curve(truth = truth, prob_yes) %>%
+  autoplot()
+# ggsave(filename = file.path("pics","fig10_family_1.png"))
+```
+```{r}
+
+```
+
+## DBSCAN
+
+```{r dbscan}
+
+cpk2.3 ->  cluster_data_for_vizualisation
+
+cpk2.3 %>% select(-HasDiseaseFL) -> cluster_data_for_model
+
+recipe(~ ., data = cluster_data_for_model) %>%
+  step_zv(all_predictors()) %>%
+  step_scale(all_numeric_predictors()) %>%
+  #step_dummy(Sex) %>%
+  prep(cluster_data_for_model) %>%
+  juice() -> data_recoded
+
+data_recoded %>%
+  daisy(metric = "gower") %>%
+  umap(n_components = 10) -> umap_data
+
+data_recoded %>%
+  daisy(metric = "gower") %>%
+  umap(n_components = 3) -> umap_data_for_visualization
+
+umap_data %>%
+  daisy(metric = "gower") -> dist_data
+
+dist_data %>%
+ dbscan::dbscan(eps = mean(dist_data)) -> cluster_data_for_model
+
+# dist_data %>%
+#   dbscan::hdbscan(minPts = 5) -> cluster_data_for_model
+
+umap_data_for_visualization %>%
+  as_tibble() %>%
+  mutate(Cluster = as.factor(str_c("Cluster №", cluster_data_for_model$cluster)),
+         HasDiseaseFL = cluster_data_for_vizualisation$HasDiseaseFL) %>%
+  rename( Component1 = V1,
+          Component2 = V2,
+          Component3 = V3) -> data_3d
+
+umap_fig <- plot_ly(data_3d,
+        x =~ Component1,
+        y =~ Component2,
+        z =~ Component3,
+        color =~ Cluster, hoverinfo = "text", text = ~paste(HasDiseaseFL)) %>%
+  
+  add_markers(size = 1.5)
+
+plot_ly(data_3d,
+        x =~ Component1,
+        y =~ Component2,
+        z =~ Component3,
+        color =~ Cluster, hoverinfo = "text", text = ~paste(HasDiseaseFL)) %>%
+  
+  add_markers(size = 1.5)
+
+htmlwidgets::saveWidget(
+                widget = umap_fig, #the plotly object
+                file = "./pics/umap_figure.html", #the path & file name
+                selfcontained = TRUE #creates a single html file
+                )
+
+```
