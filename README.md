@@ -70,8 +70,17 @@ Following results have been obtained regarding particular taxon levels:
 2. ML model built on Random forest algorithm can efficiently separate  subjects with and without IBS-C 
 3. By using the UMAP algorithm it is possible to divide research subjects into distinct clusters, where the health status makes a significant contribution, but this factor is not the only one
 
+**Genus level**:
+
+1. Batch Effects: Analysis revealed significant batch effects impacting taxon abundance across various research identifiers.
+2. Health State Influence: Kruskal-Wallis tests showed a significant impact of Health_State on taxon abundance, with a preponderance of low p-values indicating non-random disparities.
+3. Association with IBS-C: A Generalized Linear Mixed Model indicated no significant link between gas-producing bacterial presence and IBS-C
+4. The utilization of Boruta-selected features in a random forest model purportedly yielded exceptional predictive accuracy for Health_State classification, as demonstrated by an AUC of 0.9986, 96.49% accuracy, and a Kappa of 0.9163. However, these metrics, notably high for biological datasets, might suggest a potential issue with the model. The extraordinary performance could erroneously imply model effectiveness when, in reality, it may be indicative of underlying problems such as batch effects. 
+5. UMAP Clustering: Despite discernible clustering in UMAP analysis, the clusters lacked a clear pattern or link to specific health conditions or states within the dataset.
+
 ### Conclusion
 Despite highlighting important classes, it is worth noting that the exact mechanisms of how these classes influence IBS require more research, as the higher the taxonomic level, the larger it is. As  it contains more general information, we may find fewer subtle differences
+
 
 ### References
 
