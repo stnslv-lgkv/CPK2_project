@@ -1,0 +1,711 @@
+---
+title: "Untitled"
+author: "Arefeva Anna"
+date: "23 12 2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+library(tidyverse)
+library(readxl)
+library(tidymodels)
+library(embed)
+library(themis)
+library(ggcorrplot)
+library(psych)
+library(yardstick)
+library(vip)
+library(Boruta)
+library(rpart)
+library(uwot)
+library(plotly)
+library(cluster)
+library(dplyr)
+## input_data
+#reading individual pages of a file with bacterial function and leading them to identical form - a column indicating functions and 1/0 values for each bacterial name
+
+bac_gr_funcs1 <- read_excel("Bacterial group functions.xlsx", sheet = 'Патогены и нежелательные')
+
+bac_gr_funcs1 <- bac_gr_funcs1 %>%
+  mutate(Condicionally_norm = ifelse(Bacteria_category == 'Условно-нормальный', 1, 0),
+         Patogen = ifelse(Bacteria_category == 'Патоген', 1, 0),
+          TaxonName = gsub(" ", "_", TaxonName),
+         Bacteria_tax = paste(TaxonName, Rank, sep = "_"))%>%
+  select(-TaxonName, -Rank, -Bacteria_category)
+
+
+
+bac_gr_funcs2 <- read_excel("Bacterial group functions.xlsx", sheet = 'Продуценты серотонина')
+
+bac_gr_funcs2 <- bac_gr_funcs2 %>%
+  distinct(.keep_all = TRUE)%>%
+  mutate(Value = 1) %>%
+  pivot_wider(names_from = Neuromediator, values_from = Value)%>%
+  mutate (TaxonName = gsub(" ", "_", TaxonName),
+         Bacteria_tax = paste(TaxonName, Rank, sep = "_"))%>%
+  select(-TaxonName, -Rank)
+
+
+
+bac_gr_funcs3 <- read_excel("Bacterial group functions.xlsx", sheet = 'Пробиотики') 
+bac_gr_funcs3 <- bac_gr_funcs3 %>%
+  mutate(Probiotics = 1,
+          TaxonName = gsub(" ", "_", TaxonName),
+         Bacteria_tax = paste(TaxonName, Rank, sep = "_"))%>%
+  select(-TaxonName, -Rank)
+
+
+
+bac_gr_funcs4 <- read_excel("Bacterial group functions.xlsx", sheet = 'Бактерии с особыми свойстами') 
+
+
+
+bac_gr_funcs4 <- bac_gr_funcs4 %>%
+  mutate(Specific = 1,
+          TaxonName = gsub(" ", "_", TaxonName),
+         Bacteria_tax = paste(TaxonName, Rank, sep = "_"))%>%
+  select(-TaxonName, -Rank)
+
+
+bac_gr_funcs5 <- read_excel("Bacterial group functions.xlsx", sheet = 'Витаминные') 
+
+bac_gr_funcs5 <- bac_gr_funcs5 %>%
+  mutate(Value = 1) %>%
+  pivot_wider(names_from = Vitamin, values_from = Value)%>%
+  mutate(TaxonName = gsub(" ", "_", TaxonName),
+         Bacteria_tax = paste(TaxonName, Rank, sep = "_"))%>%
+  select(-TaxonName, -Rank)
+
+
+bac_gr_funcs6 <- read_excel("Bacterial group functions.xlsx", sheet = 'Продуценты КЦЖК') 
+bac_gr_funcs6 <- bac_gr_funcs6 %>%
+  mutate(TaxonName = gsub(" ", "_", TaxonName),
+         Bacteria_tax = paste(TaxonName, Rank, sep = "_"))%>%
+  select(-TaxonName, -Rank)
+
+
+
+bac_gr_funcs7<- read_excel("Bacterial group functions.xlsx", sheet = 'Вредные привычки') 
+
+bac_gr_funcs7 <- bac_gr_funcs7 %>%
+  distinct(.keep_all = TRUE)%>%
+  pivot_wider(names_from = Habbit, values_from = Habit_state)%>%
+  mutate(TaxonName = gsub(" ", "_", TaxonName),
+         Bacteria_tax = paste(TaxonName, Rank, sep = "_"))%>%
+  select(-TaxonName, -Rank)
+```
+
+
+```{r setup, include=FALSE}
+#merging pages with bacterial functions into one table
+
+bac_gr_funcs <- full_join(bac_gr_funcs1, bac_gr_funcs2)
+bac_gr_funcs <- full_join(bac_gr_funcs, bac_gr_funcs3)
+
+bac_gr_funcs <- full_join(bac_gr_funcs, bac_gr_funcs4)
+bac_gr_funcs <- full_join(bac_gr_funcs, bac_gr_funcs5)
+bac_gr_funcs <- full_join(bac_gr_funcs, bac_gr_funcs6)
+bac_gr_funcs <- full_join(bac_gr_funcs, bac_gr_funcs7)
+
+
+#file with data of patients 
+
+fbh <- read.csv('final_bacteria_health.csv') 
+fb140 <- read.csv("final_bacteria_ibs_140.csv")                         
+fbh_stats <- openxlsx::read.xlsx("final_health_statistic.xlsx")          
+fb140_stats <- openxlsx::read.xlsx("final_ibs_140_statistic.xlsx")  
+
+fb140_long <- fb140 %>%
+  pivot_longer(cols = X01D2Z36_F:possible.genus.03_G,
+               names_to = 'Bacteria_tax',
+               values_to = 'Value')
+
+
+fbh_long <- fbh %>%
+  pivot_longer(cols = X01D2Z36_F:possible.genus.03_G,
+               names_to = 'Bacteria_tax',
+               values_to = 'Value')
+
+fb140_mrg <- fb140_long %>% 
+  inner_join(fb140_stats, by="patient_ID")%>%
+  select(-Main_Disease)
+
+fbh_mrg <- fbh_long %>% 
+  inner_join(fbh_stats, by="patient_ID")
+
+fb_long <- bind_rows(fbh_mrg, fb140_mrg)
+
+#full dataset
+
+fb_all <- fb_long %>% 
+  full_join(bac_gr_funcs, by="Bacteria_tax")
+#возраст
+fb_all <- fb_all %>%
+  mutate(Age = case_when (Age == ' ' ~ (Seq_date-Birth_Year), 
+                          Age != ' ' ~ Age))
+
+#adding Age_group (WHO classification)
+
+fb_all <- fb_all%>%
+  mutate(Young = case_when(Age <= 44 | Age_max <= 44 | Age_min <= 44 ~ 1, 
+                           Age > 44 | Age_min > 44  ~ 0),
+         Adult = case_when ((Age >= 45 & Age <= 60) | (Age_max >= 45 &Age_max <= 60) | (Age_min >= 45 & Age_min <= 60) ~ 1, 
+                            Age < 44 | Age > 60 | Age_max > 60 | Age_max < 44 | Age_min < 44 | Age_min > 60 ~ 0),
+         Old = case_when (Age > 60 | Age_max > 60 ~1,
+                          Age <= 60 | Age_max <= 60 ~ 0)
+  )
+         
+
+#BMI
+
+fb_all <- fb_all %>%
+  mutate(BMI_min = case_when (BMI_min == ' '~(Weight_min/Height_min/Height_min*10000), BMI_min != ' ' ~ BMI_min),
+         BMI_max = case_when(BMI_max == ' ' ~ (Weight_max/Height_max/Height_max*10000), BMI_max  != ' ' ~ BMI_max),
+         BMI = Weight_kg/Height_cm/Height_cm*10000)
+
+summary(fb_all)
+
+fb_all <- fb_all %>%
+  mutate(Thin = case_when (BMI < 18.5 | BMI_min < 18.5 |BMI_max < 18.5 ~ 1, BMI >18.5 | BMI_min > 18.5 ~ 0 ),
+         Norm_weight = case_when (BMI >=18.5 & BMI < 25.0 | BMI_min>=18.5&BMI_min<25.0 | BMI_max>= 18.5~1, BMI <18.5 | BMI >= 25.0 |BMI_max < 18.5 | BMI_min>=25.0 ~0 ),
+         Fat = case_when(BMI >=25.0 |BMI_max >=25.0 ~ 1, BMI < 25.0 | BMI_max < 25.0 ~ 0))
+
+
+#counting missing values
+
+NA_count <- fb_all %>%
+    mutate(n = n()) %>% 
+    summarise(across(everything(), ~ sum(is.na(.x))),
+              n = n()) %>% 
+    select(n, where(function(x) x != 0)) %>% 
+    mutate(across(everything()), round(. / n, 4)) %>% 
+    select(-n) %>% 
+    pivot_longer(
+      cols = everything(),
+      names_to = "Feature",
+      values_to = "Value"
+    ) %>% 
+    arrange(desc(Value))
+
+
+
+#saving dataset
+data.table::fwrite(fb_all, "all_long.csv")
+
+data.table::fwrite(all_data_O, 'all_data_O.csv')
+
+
+```
+
+### Order
+```{r setup, include=FALSE}
+#select data by Order (_O)
+
+all_data_O <- fb_all %>%
+  mutate(Bacteria_tax = ifelse(grepl("_O", fb_all$Bacteria_tax) == TRUE, Bacteria_tax, 'NO'))
+all_data_O <- all_data_O[all_data_O$Bacteria_tax != 'NO', ]
+
+
+#NA in Order
+
+NA_count_O <- all_data_O %>%
+    mutate(n = n()) %>% 
+    summarise(across(everything(), ~ sum(is.na(.x))),
+              n = n()) %>% 
+    select(n, where(function(x) x != 0)) %>% 
+    mutate(across(everything()), round(. / n, 4)) %>% 
+    select(-n) %>% 
+    pivot_longer(
+      cols = everything(),
+      names_to = "Feature",
+      values_to = "Value"
+    ) %>% 
+    arrange(desc(Value))
+
+
+#exclusion of bacteria with bacterial load = 0 in >280 patients
+
+bac_O <- all_data_O %>%
+  select(Bacteria_tax, Value)%>%
+  count(Bacteria_tax, Value == 0)
+
+bac_O <- bac_O%>%
+  rename(Value = 'Value == 0')
+
+bac_O <- bac_O[bac_O$Value == TRUE & bac_O$n <= 280, ]
+
+bac_O_names <- bac_O$Bacteria_tax
+bac_O_names <- na.omit(bac_O_names)
+bac_O_names
+
+all_data_O_new <- all_data_O %>%
+  filter(.$Bacteria_tax %in% bac_O_names )
+
+#removing variables with 99-100% NA
+
+data <- all_data_O_new%>%
+  select(-c(Instrument:Seq_date), -c(Birth_Year:BMI_max), -c(Weight_kg:Алкоголь), -Drugs, -BMI)
+
+NA_count_data <- data %>%
+    mutate(n = n()) %>% 
+    summarise(across(everything(), ~ sum(is.na(.x))),
+              n = n()) %>% 
+    select(n, where(function(x) x != 0)) %>% 
+    mutate(across(everything()), round(. / n, 4)) %>% 
+    select(-n) %>% 
+    pivot_longer(
+      cols = everything(),
+      names_to = "Feature",
+      values_to = "Value"
+    ) %>% 
+    arrange(desc(Value))
+
+#descriptive statistics 
+summary(data)
+
+#descriptive statistics for quantitative variables (grouping by bacteria category)
+statistics <- list(
+  `_n` = ~length(.x) %>% as.character(),
+  `_NA` = ~sum(is.na(.x)) %>% as.character(),
+  `_Mean` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", mean(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+  `_SD` = ~ifelse(sum(!is.na(.x)) < 3, "Н/П*", sd(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+  `_Min` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", min(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+  `_Max` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", max(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+  `_Median` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", median(.x, na.rm = TRUE) %>% round(2) %>% as.character()
+))
+
+group_data_O_stat <- all_data_O %>%
+  select(Bacteria_tax, where(is.numeric)) %>%
+  group_by(Bacteria_tax) %>%
+  summarize(across(where(is.numeric), statistics)) %>% 
+  pivot_longer(!Bacteria_tax) %>%
+  separate(name, into = c('Переменная', 'Статистика'), sep = "__") %>%
+  rename('Значение' = value) %>%
+  print(., n=Inf)
+```
+
+
+```{r setup, include=FALSE}
+### batch-effect ~ research_ID
+
+kruskal_res <-data %>% split(~ Bacteria_tax) %>% map(function(subdata) kruskal.test(Value ~ research_ID, data = subdata)$p.value)%>% enframe() %>% unnest(cols = value) 
+
+kruskal_res <- kruskal_res %>%
+  ungroup()%>%
+  select(Bacteria_tax, p.value)%>%
+  arrange(p.value)
+
+
+kruskal_res <- kruskal_res %>%
+  mutate(p.adjusted = p.adjust(p.value, method = 'BH'))
+
+significant <- kruskal_res %>%
+  filter(p.adjusted < 0.05)
+
+
+#visualisation
+data %>% 
+  filter(Value != 0 & research_ID != 0) %>% 
+  ggplot(aes(x=research_ID, y=Value)) + 
+    geom_point(size=1)
+```
+
+
+```{r setup, include=FALSE}
+#search for significant differences between sick and healthy people
+test_res <-data %>% split(~ Bacteria_tax) %>% map(function(subdata) wilcox.test(Value ~ Health_state, data = subdata)$p.value)%>% enframe() %>% unnest(cols = value) 
+
+
+  showbac.sex <- data %>%
+    filter(Bacteria_tax %in% test_res$name) %>% 
+    select(Bacteria_tax, Value, Health_state) %>% 
+    group_by(Health_state, Bacteria_tax) %>% 
+    summarise(meanValue = mean(Value)*100) %>% 
+    filter(meanValue > 0) %>% 
+    arrange(meanValue) %>% 
+    filter(meanValue > quantile(meanValue, 0.05) & meanValue < quantile(meanValue, 0.95)) %>% 
+    ungroup() %>% 
+    rename(word = Bacteria_tax, freq = meanValue) %>% 
+    mutate(freq = ceiling(freq)) 
+  
+  showbac.health <- showbac.sex %>%
+    filter(Health_state == "Health") %>%
+    select(-Health_state) %>% 
+    arrange(desc(freq)) %>% 
+    as.data.frame()
+  
+  showbac.desease <- showbac.sex %>%
+    filter(Health_state == "Desease") %>%
+    select(-Health_state) %>% 
+    arrange(desc(freq)) %>% 
+    as.data.frame()
+
+
+#search for significant differences between male and female
+data3 <- data [data$Sex == 'male'|data$Sex == 'female', ]
+test_res1 <-data3 %>% split(~ Bacteria_tax) %>% map(function(subdata) wilcox.test(Value ~ Sex, data = subdata)$p.value)%>% enframe() %>% unnest(cols = value)
+
+test_res1 <- test_res1 %>%
+  mutate(p.adjusted = p.adjust(value, method = 'BH'))
+
+significant_3 <- test_res1 %>%
+  filter(p.adjusted < 0.05)
+
+#visualisation (word cloud) for bacterial taxon between male and female
+  showbac.sex <- data3 %>%
+    filter(Bacteria_tax %in% test_res1$name) %>% 
+    select(Bacteria_tax, Value, Sex) %>% 
+    group_by(Sex, Bacteria_tax) %>% 
+    summarise(meanValue = mean(Value)*100) %>% 
+    filter(meanValue > 0) %>% 
+    arrange(meanValue) %>% 
+    filter(meanValue > quantile(meanValue, 0.05) & meanValue < quantile(meanValue, 0.95)) %>% 
+    ungroup() %>% 
+    rename(word = Bacteria_tax, freq = meanValue) %>% 
+    mutate(freq = ceiling(freq)) 
+  
+  showbac.sex_m <- showbac.sex %>%
+    filter(Sex == "male") %>%
+    select(-Sex) %>% 
+    arrange(desc(freq)) %>% 
+    as.data.frame()
+  
+  showbac.sex_f <- showbac.sex %>%
+    filter(Sex == "female") %>%
+    select(-Sex) %>% 
+    arrange(desc(freq)) %>% 
+    as.data.frame()
+
+
+```
+
+### ML
+```{r setup, include = FALSE, fig.width=9, fig.height=8, fig.showtext=TRUE, echo=FALSE}
+data %>% glimpse()
+
+data1 <-data%>%
+  pivot_wider(names_from = Bacteria_tax, values_from = Value)%>%
+  mutate(across(c(X0319.6G20_O:eub62A3_O), ~ as.numeric(.x)))%>%
+   mutate(across(where(is.character), as.factor))
+
+data1 %>% glimpse()
+
+
+data1 %>% count(Health_state)
+
+
+```
+
+### pre-processing
+
+```{r setup, include = FALSE}
+
+data1<-data1 %>%
+  mutate(Race = case_when(Race != NA & Race !='Caucasian' ~ 'Other'))%>%
+   mutate(across(where(is.character), as.factor))
+
+
+data1 %>%
+  select(where(is.factor)) %>%
+  map(function(x) sum(is.na(x)) / length(x)) %>%
+  enframe() %>%
+  unnest(cols = value) %>%
+  arrange(desc(value))
+
+data1 %>%
+  select(where(is.factor)) %>%
+  map(table)
+
+
+
+
+```
+
+
+
+```{r setup, include = FALSE, , fig.width=9, fig.height=35, fig.showtext=TRUE, echo=FALSE}
+#removing uninformative variables
+data2 <- data1 %>%
+  select (-patient_ID, -research_ID, -c(Sex:Sleep_duration), -c(Thin:Fat))%>%
+  drop_na()%>%
+  mutate(across(where(is.character), as.factor))
+
+data2 %>%
+  select(where(is.factor)) %>%
+  map(function(x) sum(is.na(x)) / length(x)) %>%
+  enframe() %>%
+  unnest(cols = value) %>%
+  arrange(desc(value))
+
+
+#Boruta for highlighting significant variables
+data2%>%
+  glimpse()
+Boruta(Health_state ~ ., data2, ntree = 500, maxRuns = 300) %>%
+  TentativeRoughFix() -> boruta_trained
+boruta.sig.vars <- boruta_trained %>%
+  attStats() %>%
+  filter(decision == "Confirmed" & meanImp > 5) %>% 
+  arrange(desc(meanImp)) %>% 
+  rownames_to_column(var = "ImpVar") %>% 
+  select(ImpVar) %>% 
+  pull()
+
+boruta_trained %>%
+  attStats() %>%
+  rownames_to_column("Переменная") %>%
+  mutate(`Переменная` = `Переменная` %>% fct_reorder(`meanImp`)) %>%
+  
+  ggplot(aes(y = `Переменная`, x = meanImp, colour = decision)) +
+  geom_point() +
+  geom_errorbar(aes(xmin = minImp, xmax = maxImp, width = 0.1)) +
+  xlab("Среднее снижение энтропии") +
+  labs(color = "Значимость переменной") +
+  theme(legend.position = "bottom")
+  #scale_color_disrete(labels = c("Подтверждённая", "Неподтверждённая"))
+
+
+```
+
+
+```{r setup, include = FALSE}
+
+
+CPK <- data2[sample(nrow(data2)), ]
+CPK <- CPK %>% select(Health_state, boruta.sig.vars)%>%
+  mutate(Health_state = ifelse(Health_state == "Disease", 1, 0))
+
+  
+split_train_test <- initial_split(data2, strata = Health_state, prop = 0.9)
+
+CPK_train <- split_train_test %>% training()
+CPK_test <- split_train_test %>% testing()
+
+
+
+```
+
+
+
+```{r setup, include = FALSE}
+cat_metric <- yardstick::metric_set(
+  
+    yardstick::bal_accuracy,
+    yardstick::precision,
+    yardstick::recall,
+    yardstick::f_meas,
+    yardstick::sensitivity,
+    yardstick::specificity,
+    yardstick::j_index
+  
+  )
+```
+### creating a recipe
+
+```{r setup, include = FALSE}
+CPK_recipe <- recipe(Health_state ~ ., CPK_train) %>%
+  
+  step_impute_bag(all_numeric_predictors()) %>%
+  step_zv(all_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_lincomb(all_numeric_predictors()) %>%
+  #step_normalize(all_numeric_predictors()) %>%
+  step_lencode_glm(all_nominal_predictors(), outcome = vars(Health_state)) %>%
+  step_adasyn(Health_state) #%>%
+  #prep()
+
+#heart_recipe %>% juice() %>% count(HeartDisease)
+#heart_train %>% count(HeartDisease)
+
+```
+
+### definition of model
+
+```{r setup, include = FALSE}
+rf_model <- rand_forest(mode = "classification", mtry = tune(), trees = tune(), min_n = tune()) %>%
+  set_engine("ranger")
+```
+
+### definition of samples
+```{r setup, include = FALSE}
+cv_samples <- vfold_cv(CPK_train, strata = Health_state, v = 4)
+```
+
+
+### definition of parameters_grid
+```{r setup, include = FALSE}
+parameters_grid <- grid_max_entropy(mtry(range = c(3, 5)), trees(), min_n(), size = 10)
+```
+
+
+### pipeline
+```{r setup, include = FALSE}
+reg_workflow <- workflow() %>%
+  add_recipe(CPK_recipe) %>%
+  add_model(rf_model)
+
+round(19.48*2)/2
+```
+
+
+### learning
+```{r setup, include = FALSE}
+grid_search <- reg_workflow %>%
+  
+  tune_grid(
+    
+    object = reg_workflow,
+    resamples = cv_samples,
+    grid = parameters_grid,
+    control = control_grid(save_pred = TRUE),
+  
+
+    metrics = metric_set(sensitivity, specificity, j_index)
+
+)
+```
+
+### visualisation
+```{r setup, include = FALSE}
+grid_search %>%
+  collect_metrics() %>%
+  ggplot(aes(trees, mean, color = .metric)) +
+  geom_errorbar(aes(ymin = mean - std_err, ymax = mean + std_err), alpha = 0.8) +
+  geom_line(size = 1)
+
+```
+
+
+### selection of the best model
+```{r setup,  include = FALSE }
+best_by_j_index <- grid_search %>% select_best("j_index")
+
+best_by_j_index %>%   flextable::flextable() %>% flextable::theme_box()
+
+final_reg_model <- finalize_workflow(
+  
+  reg_workflow,
+  best_by_j_index
+  
+)
+```
+
+### comparison of metrics on test and training data
+```{r setup,  include = FALSE }
+
+final_reg_model %>%
+  fit(CPK_train) %>%
+  extract_fit_parsnip() %>%
+  vi() %>%
+  mutate(Variable = fct_reorder(Variable, Importance)) %>%
+  ggplot(aes(x = Importance, y = Variable, fill = Sign)) +
+  geom_col() +
+  labs(y = NULL)
+
+
+final_reg_model %>%
+  keras::fit(CPK_train) %>%
+  predict(CPK_test) %>%
+  pull() -> final_test_prediction
+
+metrics_on_test <- cat_metric(truth = truth_values, estimate = estimate_values, tibble(truth_values = CPK_test$Health_state, estimate_values = final_test_prediction)) %>% rename(test_estimate = `.estimate`) %>% select(!`.estimator`)
+
+# train data
+
+final_reg_model %>%
+  keras::fit(CPK_train) %>%
+  predict(CPK_train) %>%
+  pull() -> final_train_prediction
+
+metrics_on_train <- cat_metric(truth = truth_values, estimate = estimate_values, tibble(truth_values = CPK_train$Health_state, estimate_values = final_train_prediction)) %>% rename(train_estimate = `.estimate`) %>% select(!`.estimator`)
+
+# binding
+
+metrics_on_test %>%
+  left_join(metrics_on_train, by = ".metric") %>%
+  mutate(differencies = train_estimate - test_estimate) %>% 
+  flextable::flextable() %>% flextable::theme_box()
+```
+
+### final estimation
+
+```{r setup, include = FALSE}
+last_fit(
+  
+  final_reg_model,
+  split_train_test
+  
+) -> final_model_all_data
+
+final_model_all_data %>%
+  extract_workflow() %>%
+  predict(CPK, type = "class") %>%
+  pull() -> class_prediction
+
+final_reg_model %>%
+  extract_workflow() %>%
+  predict(CPK, type = "prob") %>%
+  pull() -> prob_prediction
+
+log_model_results <- tibble(truth = CPK$Health_state,
+                            estimate = class_prediction,
+                            prob_yes = 1 - prob_prediction)
+
+cat_metric(truth = truth, estimate = estimate, log_model_results) 
+
+log_model_results %>%
+  roc_curve(truth = truth, prob_yes) %>%
+  autoplot()
+```
+
+# DBSCAN
+
+```{r setup, include = FALSE}
+
+
+data -> cluster_data_for_vizualisation
+
+data %>% select(!Health_state) -> cluster_data_for_model
+
+recipe(~ ., data = cluster_data_for_model) %>%
+  step_scale(all_numeric_predictors()) %>%
+  #step_dummy(Sex) %>%
+  prep(cluster_data_for_model) %>%
+  juice() -> data_recoded
+
+data_recoded %>%
+  daisy(metric = "gower") %>%
+  umap(n_components = 7) -> umap_data
+
+data_recoded %>%
+  daisy(metric = "gower") %>%
+  umap(n_components = 3) -> umap_data_for_visualization
+
+umap_data %>%
+  daisy(metric = "euclidean") -> dist_data
+
+#dist_data %>%
+#  dbscan::dbscan(eps = mean(dist_data)) -> cluster_data_for_model
+
+dist_data %>%
+  dbscan::hdbscan(minPts = 5) -> cluster_data
+
+umap_data_for_visualization %>%
+  as_tibble() %>%
+  mutate(`Кластер` = as.factor(str_c("Кластер №", cluster_data$cluster)),
+         Category = cluster_data_for_vizualisation$Category) %>%
+  rename(`Компонент 1` = V1,
+         `Компонент 2` = V2,
+         `Компонент 3` = V3) -> data_3d
+
+
+plot_ly(data_3d,
+        x =~ `Компонент 1`,
+        y =~ `Компонент 2`,
+        z =~ `Компонент 3`,
+        color =~ `Кластер`, hoverinfo = "text", text = ~paste(Category)) %>%
+  
+  add_markers(size = 1.5)

@@ -1,0 +1,604 @@
+---
+title: "Classes"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+date: '2024'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(tidymodels)
+library(embed)
+library(ggcorrplot)
+library(readxl)
+library(ggpubr)
+library(flextable)
+library(themis)
+library(psych)
+library(yardstick)
+library(vip)
+library(Boruta)
+library(rpart)
+library(uwot)
+library(plotly)
+library(cluster)
+library(lme4)
+library(lmerTest)
+library(broom)
+
+set.seed(123)
+
+pretty_p <- function(x) {
+
+  map_chr(x, function(x) ifelse(is.na(x) | is.nan(x), return("Не определено"), ifelse(x < 0.001, return("<0,001"), return(round(x, 3) %>% formatC(format = "f", digits = 3, decimal.mark = ",")))))
+
+}
+
+base_flextable <- function(subtable) {
+  
+  subtable %>%
+    flextable() %>%
+    theme_box() %>%
+    width(width = 1) %>%
+    align(align = "center", part = "all")
+  
+}
+
+non_constant_CI <- function(x, significant_digits) {
+    
+  if (sd(x, na.rm = TRUE) < 0.001 | is.na(sd(x, na.rm = TRUE))) {
+  
+    return("Н/П*")
+  
+  } else {
+  
+    paste0(t.test(x)$conf.int %>% round(significant_digits) %>% as.numeric() %>%     str_c(collapse = " - "))
+
+  }
+  
+}
+
+
+statistics <- list(
+  
+  `Number of entities` = ~length(.x) %>% as.character(),
+  `Number (data is available)` = ~sum(!is.na(.x)) %>% as.character(),
+  `No data` = ~sum(is.na(.x)) %>% as.character(),
+  `Mean value` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", mean(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+  `SD` = ~ifelse(sum(!is.na(.x)) < 3, "Н/П*", sd(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+  `95% СI` = ~non_constant_CI(.x, 2),
+  `min - max` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", paste0(min(.x, na.rm = TRUE) %>% round(2), " - ", max(.x, na.rm = TRUE) %>% round(2))),
+  `Медиана` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", median(.x, na.rm = TRUE) %>% round(2) %>% as.character()),
+  `Q1 - Q3` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", paste0(quantile(.x, 0.25, na.rm = TRUE) %>% round(2), " - ", quantile(.x, 0.75, na.rm = TRUE) %>% round(2)))
+  
+)
+
+```
+
+1) Reading all the data that was recieved 
+
+```{r}
+
+fbh <- read_csv("final_bacteria_health.csv")                           
+fb140 <- read_csv("final_bacteria_ibs_140.csv")                        
+
+fbh_stats <- read_excel("final_health_statistic.xlsx")
+fb140_stats <- read_excel("final_ibs_140_statistic.xlsx")
+
+```
+2) Making long dataset, filtring the desired taxa level and merging all the tables together.
+```{r}
+fbh %>% 
+  pivot_longer(!patient_ID) %>% 
+  filter(str_detect(name, "_C")) %>%
+  mutate(across(name, function(x) str_remove(x, "_C"))) -> fbh_C
+
+################################################################
+
+fb140 %>% 
+  pivot_longer(!patient_ID) %>% 
+  filter(str_detect(name, "_C")) %>%
+  mutate(across(name, function(x) str_remove(x, "_C"))) -> fb140_C
+
+################################################################
+
+fbh_C %>%
+  bind_rows(fb140_C) -> fbh_C_all
+
+################################################################
+################################################################
+
+fbh_stats %>%
+  bind_rows(fb140_stats) %>%
+  select(!c(Drugs, Weight_kg, Height_cm, Weight_min, Weight_max, Height_min, Height_max)) -> fbh_stats_cleaned 
+
+################################################################
+################################################################
+
+fbh_C_all %>%
+  left_join(fbh_stats_cleaned, by = "patient_ID") %>%
+  filter(value != 0) %>%
+  rename(`Taxon name` = name, `Taxon abundunce` = value) %>%
+  mutate(across(where(is.character), function(x) x %>% na_if("\\<NA\\>") %>% as.factor())) -> cleaned_data
+
+```
+
+3) Actually realised that zery values of taxon abundunce also important as it means that healthy subject may not have a bacteria because they are healthy, but sick subject may have the bacteria which is not presented in feaces of healthy person and vice versa
+
+```{r}
+
+fbh_C_all %>%
+  left_join(fbh_stats_cleaned, by = "patient_ID") %>%
+  rename(`Taxon name` = name, `Taxon abundunce` = value) %>%
+  mutate(across(where(is.character), function(x) x %>% na_if("\\<NA\\>") %>% as.factor())) -> cleaned_data_C
+
+```
+
+# Descriptive statistics
+
+4) Counting all the values in each column and grouping them, so we can see how many NAs are in the df
+
+```{r}
+####буква С
+cleaned_data %>% 
+  select(!c(patient_ID, `Taxon name`)) %>%
+  select(function(x) length(unique(as.character(na.omit(x)))) > 1) %>%
+  select(where(is.factor)) %>%
+  map(table, useNA = "always")
+```
+5) Counting all the values in each column and grouping them, so we can see how many NAs are in the df with zero values in taxon abundunce
+
+```{r}
+###буква С с 0
+cleaned_data_C %>% 
+  select(!c(patient_ID, `Taxon name`)) %>%
+  select(function(x) length(unique(as.character(na.omit(x)))) > 1) %>%
+  select(where(is.factor)) %>%
+  map(table, useNA = "always")
+
+```
+
+# Quantitative tables 
+6) The tables below shows that there is no significant difference in taxon tatal quantitative distribution between healthy and sick subjects 
+No significant difference was noticed in SD, mean valeu, 95% CI, so we can say that the total number of taxon distribution in human body does not vary in healthy and sick subjects
+```{r}
+cleaned_data_C %>%
+  select(Health_state, `Taxon abundunce`) %>%
+  group_by(Health_state) %>%
+  summarise(across(`Taxon abundunce`, statistics)) %>%
+  pivot_longer(-all_of("Health_state")) %>%
+  ungroup() %>%
+  separate(name, into = c("Variable", "Parameter"), sep = "_") %>%
+  rename(`Taxon abundunce` := value, `Health state` = Health_state) %>%
+  select(!`Variable`) %>%
+
+  flextable() %>%
+  theme_box() %>%
+  align(align = "center") %>%
+  merge_v("Health state")
+```
+
+
+# Categorical tables 
+7) The table below shows that there are more healthy subject who sleeps 7-8 hours. Maybe if subjects sleeps required number of hours they tend to have less stress, and stress is one of factors what can cause IBS
+```{r}
+cleaned_data %>%
+  distinct(patient_ID, .keep_all = TRUE) %>%
+  select(Health_state, Sleep_duration) %>%
+  filter(!is.na(Sleep_duration)) %>%
+  
+  count(Health_state, Sleep_duration, .drop = FALSE) %>%
+  group_by(Health_state) %>%
+  mutate(`Relative frequency` = (n / sum(n)) %>% round(4) %>% `*`(100) %>% str_c("%")) %>%
+  rename(`Absolute frequency` = n) %>%
+  
+  flextable() %>%
+  theme_box() %>%
+  align(align = "center") %>%
+  merge_v("Health_state")
+```
+8) From the table below we can see that women have IBS more often. Relative frequency shows that 20% os females have IBS, while there only 3.9% males with disease. 
+Women are often under more stress than men due to societal expectations and roles, which can impact their mental and physical health. Hormonal changes, particularly those related to menstruation, can influence the gut and potentially exacerbate IBS symptoms. Women experience changes in the composition of their gut bacteria during their menstrual cycle, which could potentially impact digestive function
+```{r}
+cleaned_data %>%
+  distinct(patient_ID, .keep_all = TRUE) %>%
+  select(Health_state, Sex) %>%
+  filter(!is.na(Sex)) %>%
+  filter(Sex != "mixed") %>%
+  mutate(Sex = Sex %>% droplevels()) %>%
+  
+  count(Sex, Health_state, .drop = FALSE) %>%
+  group_by(Sex) %>%
+  mutate(`Relative frequency` = (n / sum(n)) %>% round(4) %>% `*`(100) %>% str_c("%")) %>%
+  rename(`Absolute frequency` = n) %>%
+  
+  flextable() %>%
+  theme_box() %>%
+  align(align = "center") %>%
+  merge_v("Sex")
+
+```
+9) Tried to see if there are difference in health state in subjects of different education levels, as each levels have certain life style(e.g diet, stress level), but more clarifications are needed
+```{r}
+cleaned_data %>%
+  distinct(patient_ID, .keep_all = TRUE) %>%
+  select(Health_state, Education_level) %>%
+  filter(!is.na(Education_level)) %>%
+  
+  count(Health_state, Education_level, .drop = FALSE) %>%
+  group_by(Health_state) %>%
+  mutate(`Relative frequency` = (n / sum(n)) %>% round(4) %>% `*`(100) %>% str_c("%")) %>%
+  rename(`Absolute frequency` = n) %>%
+  
+  flextable() %>%
+  theme_box() %>%
+  align(align = "center") %>%
+  merge_v("Health_state")
+
+```
+10) Antibiotic usage can indeed cause Irritable Bowel Syndrome (IBS). The gut microbiota, which includes both "good" and "bad" bacteria, plays a crucial role in maintaining our digestive health. Antibiotics, while effective against harmful bacteria, can also disrupt this delicate balance, potentially leading to gastrointestinal issues such as IBS
+Antibiotics can cause serious changes in the bacterial community in a person's microbiome and cause various health effects. One study showed that antibiotics kill off both gut bacteria and intestinal cells needed to absorb nutrients and regulate the body's immune system, among other important bodily functions. From the table below we can that subject with extended antibiotic usage have IBS. 
+```{r}
+cleaned_data %>%
+  distinct(patient_ID, .keep_all = TRUE) %>%
+  select(Health_state, Antibiotics_usage) %>%
+  filter(!is.na(Antibiotics_usage)) %>%
+  
+  count(Antibiotics_usage, Health_state, .drop = FALSE) %>%
+  group_by(Antibiotics_usage) %>%
+  mutate(`Relative frequency` = (n / sum(n)) %>% round(4) %>% `*`(100) %>% str_c("%")) %>%
+  rename(`Absolute frequency` = n) %>%
+  
+  flextable() %>%
+  theme_box() %>%
+  align(align = "center") %>%
+  merge_v("Antibiotics_usage")
+```
+11) Dummy variables were created for taxon abundunce, if value is zero it is 0, is valuse is more than 0 it is 1.
+```{r}
+
+presence_of_taxone <- cleaned_data_C %>%
+    mutate(`наличие` = case_when(`Taxon abundunce` == 0 ~ 0, `Taxon abundunce` > 0 ~ 1))
+
+presence_of_taxone %>%
+  count(наличие, .drop = FALSE)
+
+```
+
+12) Table below shows the frequency occurrence of each bacteria 
+```{r}
+
+presence_of_taxone %>%
+  #distinct(patient_ID, .keep_all = TRUE) %>%
+  select(`Taxon name`, наличие, ) %>%
+  
+  count(`Taxon name`, наличие, .drop = FALSE) %>%
+  group_by(`Taxon name`) %>%
+  mutate(`Relative frequency` = (n / sum(n)) %>% round(4) %>% `*`(100) %>% str_c("%")) %>%
+  rename(`Absolute frequency` = n) %>%
+  
+  flextable() %>%
+  theme_box() %>%
+  align(align = "center") %>%
+  merge_v("Taxon name")
+
+
+```
+13) Now bacterias are group by the frequency of presence in healthy and sick subject together 
+```{r}
+
+presence_of_taxone %>% 
+  #select(patient_ID, `Taxon name`, Presence = `наличие`) %>%
+  rename(Presence = `наличие`) %>%
+  group_by(`Taxon name`) %>%
+  summarise(Frequency_of_taxon = sum(Presence) / 285) %>%
+  arrange(desc(Frequency_of_taxon)) %>% #filter(`Taxon name` == "Cyanobacteriia") 
+  
+  mutate(Prevalence = case_when(
+    
+    Frequency_of_taxon == 1 ~ "Everybody has a taxon",
+    Frequency_of_taxon >= 0.8 & Frequency_of_taxon < 1 ~ "A very common taxon",
+    Frequency_of_taxon >= 0.3 & Frequency_of_taxon < 0.8 ~ "Medium common taxon",
+    Frequency_of_taxon >= 0.05 & Frequency_of_taxon < 0.3 ~ "Weakly distributed taxon",
+    Frequency_of_taxon < 0.05 ~ "Extremely rare taxon"
+ 
+  ) %>% factor(levels = c("Everybody has a taxon", "A very common taxon", "Medium common taxon", "Weakly distributed taxon", "Extremely rare taxon"))) -> taxon_prevalence_data
+
+```
+
+
+```{r}
+
+taxon_prevalence_data %>%
+  #distinct(patient_ID, .keep_all = TRUE) %>%
+  select(Prevalence, `Taxon name`) %>%
+  arrange(Prevalence) %>%
+  
+  flextable() %>%
+  theme_box() %>%
+  align(align = "center", part = "all") %>%
+  merge_v("Prevalence") 
+
+```
+
+14) Table shows destribution frequency of extremely rare bacteria among healthy and sick subjects 
+
+
+```{r}
+
+presence_of_taxone %>%
+  
+  left_join(taxon_prevalence_data, by = "Taxon name") %>%
+  
+  filter(Prevalence == "Extremely rare taxon" & `наличие` == 1) %>%
+  mutate(`Taxon name` = `Taxon name` %>% droplevels()) %>%
+  
+  
+  #select(, Health_state, Prevalence) %>%
+  
+  count(`Taxon name`, Health_state, .drop = FALSE) %>%
+  group_by(`Taxon name`) %>%
+  mutate(`Relative frequency` = (n / sum(n)) %>% round(4) %>% `*`(100) %>% str_c("%")) %>%
+  rename(`Absolute frequency` = n) -> interim_cat_table
+
+interim_cat_table %>%
+  
+  filter(Health_state == "Disease" & `Absolute frequency` > 0) %>% pull(`Taxon name`) %>% unique() -> taxon_names_tech
+
+
+interim_cat_table %>%
+  filter(`Taxon name` %in% taxon_names_tech) %>%
+  
+  flextable() %>%
+  theme_box() %>%
+  align(align = "center") %>%
+  merge_v("Taxon name")
+
+```
+
+15) Table shows destribution frequency of weakly distributed bacteria among healthy and sick subjects 
+
+```{r}
+
+presence_of_taxone %>%
+  
+  left_join(taxon_prevalence_data, by = "Taxon name") %>%
+  
+  filter(Prevalence == "Weakly distributed taxon" & `наличие` == 1) %>%
+  mutate(`Taxon name` = `Taxon name` %>% droplevels()) %>%
+  
+  
+  #select(, Health_state, Prevalence) %>%
+  
+  count(`Taxon name`, Health_state, .drop = FALSE) %>%
+  group_by(`Taxon name`) %>%
+  mutate(`Relative frequency` = (n / sum(n)) %>% round(4) %>% `*`(100) %>% str_c("%")) %>%
+  rename(`Absolute frequency` = n) -> interim_cat_table
+
+interim_cat_table %>%
+  
+  filter(Health_state == "Disease" & `Absolute frequency` > 0) %>% pull(`Taxon name`) %>% unique() -> taxon_names_tech
+
+
+interim_cat_table %>%
+  filter(`Taxon name` %in% taxon_names_tech) %>%
+  
+  flextable() %>%
+  theme_box() %>%
+  align(align = "center") %>%
+  merge_v("Taxon name")
+
+```
+
+16) Table shows destribution frequency of a very common bacteria among healthy and sick subjects 
+
+```{r}
+
+presence_of_taxone %>%
+  
+  left_join(taxon_prevalence_data, by = "Taxon name") %>%
+  
+  filter(Prevalence == "A very common taxon" & `наличие` == 1) %>%
+  mutate(`Taxon name` = `Taxon name` %>% droplevels()) %>%
+  
+  
+  #select(, Health_state, Prevalence) %>%
+  
+  count(`Taxon name`, Health_state, .drop = FALSE) %>%
+  group_by(`Taxon name`) %>%
+  mutate(`Relative frequency` = (n / sum(n)) %>% round(4) %>% `*`(100) %>% str_c("%")) %>%
+  rename(`Absolute frequency` = n) -> interim_cat_table
+
+interim_cat_table %>%
+  
+  filter(Health_state == "Disease" & `Absolute frequency` > 0) %>% pull(`Taxon name`) %>% unique() -> taxon_names_tech
+
+
+interim_cat_table %>%
+  filter(`Taxon name` %in% taxon_names_tech) %>%
+  
+  flextable() %>%
+  theme_box() %>%
+  align(align = "center") %>%
+  merge_v("Taxon name")
+
+```
+
+
+
+
+```{r}
+
+library(yardstick)
+cat_metric <- yardstick::metric_set(
+  
+    yardstick::bal_accuracy,
+    yardstick::precision,
+    yardstick::recall,
+    yardstick::f_meas,
+    yardstick::sensitivity,
+    yardstick::specificity,
+    yardstick::j_index
+  
+  )
+
+```
+
+
+
+17) Shuffle the data to avoid affecting the data by the way it was collected 
+
+```{r}
+
+taxon_for_model <- presence_of_taxone[sample(nrow(presence_of_taxone)), ]
+
+```
+
+
+# Model for the characteristics of subjects depending on the abundunce of the bacterial taxon and other characteristics
+
+## Health
+
+18) Using Boruta the significant bacteria are chosen, after that creating the new dataset which contains only significant bacteria. When pre-processing of the date is complted we creat logistic regression model that shows how strongly and in which direction the abundance of the class of bacteria is associated with the fact that a person will be sick
+```{r}
+taxon_for_model %>%
+  filter(`Taxon name` != "Subgroup 21") %>%
+  select(`Taxon abundunce`, `Taxon name`, Health_state) %>%
+  pivot_wider(names_from = `Taxon name`, values_from = `Taxon abundunce`) %>%
+  unnest() -> health_data_for_boruta
+
+Boruta(Health_state ~ ., health_data_for_boruta, ntree = 500, maxRuns = 1000) %>%
+  TentativeRoughFix() -> boruta_trained
+
+boruta_trained %>%
+  attStats() %>%
+  rownames_to_column("Переменная") %>%
+  mutate(`Переменная` = `Переменная` %>% fct_reorder(`meanImp`)) %>%
+  
+  filter(decision == "Confirmed") %>%
+  arrange(desc(meanImp)) %>%
+  select(`Переменная`) -> significant_taxons
+
+
+boruta_trained %>%
+  attStats() %>%
+  rownames_to_column("Переменная") %>%
+  mutate(`Переменная` = `Переменная` %>% fct_reorder(`meanImp`)) %>%
+  
+  filter(decision == "Confirmed") %>%
+  arrange(desc(meanImp)) %>%
+  
+  ggplot(aes(y = `Переменная`, x = meanImp, colour = decision)) +
+  geom_point() +
+  geom_errorbar(aes(xmin = minImp, xmax = maxImp, width = 0.1)) +
+  xlab("Average decrease of entropy") +
+  labs(color = "Significance of the variable") +
+  theme(legend.position = "bottom")
+
+#################################################################################
+
+significant_taxons %>% write_tsv("data/interim/significant_taxones_for_health_state.txt")
+
+#################################################################################
+
+outcome_variable <- "Health_state"
+
+taxon_for_model %>%
+  filter(`Taxon name` %in% as.character(pull(significant_taxons, `Переменная`))) %>%
+  select(!`наличие`) %>%
+  pivot_wider(names_from = `Taxon name`, values_from = `Taxon abundunce`) %>% #count(Alcohol, .drop = FALSE)
+  
+  select(outcome_variable,
+         
+         patient_ID, research_ID, Seq_region, as.character(pull(significant_taxons, `Переменная`))) %>%
+  
+  mutate(Seq_region = ifelse(Seq_region == "V4", "Один регион", "Два региона") %>% factor(levels = c("Один регион", "Два региона")),
+         across(outcome_variable, function(x) x %>% relevel("Health"))) %>%
+  select(!c(Seq_region)) -> data_for_model
+
+data_for_model %>%
+  #select(as.character(pull(significant_taxons, `Переменная`))) %>%
+  summarise(across(everything(), function(x) sum(x == 0) / length(x))) %>%
+  pivot_longer(everything()) %>%
+  arrange(desc(value)) %>%
+  
+  filter(value < 0.7) -> variables_for_model
+
+data_for_model %>%
+  select(variables_for_model$name) -> data_for_model
+
+############################################################################################################################################
+
+#glmer(str_c(outcome_variable, " ~ ", str_c(str_c("`", as.character(pull(significant_taxons, `Переменная`)), "`"), collapse = " + "), " + (1 | research_ID)"), data_for_model, family = binomial()) %>%
+#  summary()
+
+
+#glm(str_c(outcome_variable, " ~ ", str_c(str_c("`", as.character(pull(significant_taxons, `Переменная`)), "`"), collapse = " + ")), data_for_model, family = binomial()) %>% broom::tidy(exponentiate = TRUE)
+
+glm(str_c(outcome_variable, " ~ ", str_c(str_c("`", as.character(data_for_model %>% select(!c(Health_state, patient_ID, research_ID)) %>% names()), "`"), collapse = " + "), ""), data_for_model, family = binomial()) %>%
+  stats::step(trace = FALSE) %>%
+  
+  tidy(exponentiate = TRUE, conf.int = TRUE) %>%
+  mutate(across(c(estimate, std.error, statistic), function(x) x %>% formatC(format = "f", digits = 3, decimal.mark = ",")),
+         `p.value` = `p.value` %>% pretty_p(),
+         
+         term = term %>% recode("(Intercept)" = "Intercept") %>%
+           str_remove_all("`"),
+         
+         conf.low = conf.low %>% formatC(format = "f", digits = 2, decimal.mark = ","),
+         conf.high = conf.high %>% formatC(format = "f", digits = 2, decimal.mark = ","),
+         
+          `95% ДИ` = str_c(conf.low, " - ", conf.high),
+         
+         conf.low = NULL,
+         conf.high = NULL
+         
+         ) %>%
+  
+  relocate(`95% ДИ`, .before = std.error) %>%
+  rename(`Переменная` = term, `Коэффициент (шансы)` = estimate, `Стандартная ошибка` = std.error, `Статистика теста` = statistic, `p-value` = `p.value`) %>%
+    select(`Переменная`, `Коэффициент (шансы)`, `95% ДИ`, `p-value`) %>% 
+  base_flextable() %>%
+  bold(i = ~ `p-value` %>% str_remove("<") %>% str_remove("\\(ANOVA\\)") %>% str_remove("\\(Kruskal test\\)") %>% str_remove("\\(t\\)")  %>% str_remove("\\(w\\)") %>% str_replace(",", "\\.") %>% as.numeric() %>% `<`(0.05), j = "p-value") %>%
+  color(i = ~ `p-value` %>% str_remove("<") %>% str_remove("\\(ANOVA\\)") %>% str_remove("\\(Kruskal test\\)") %>% str_remove("\\(t\\)")  %>% str_remove("\\(w\\)") %>% str_replace(",", "\\.") %>% as.numeric() %>% `<`(0.05) & `Коэффициент (шансы)` %>% str_replace(",", "\\.") %>% as.numeric() %>% `>`(1), color = "red", j = "Коэффициент (шансы)")%>%
+  color(i = ~ `p-value` %>% str_remove("<") %>% str_remove("\\(ANOVA\\)") %>% str_remove("\\(Kruskal test\\)") %>% str_remove("\\(t\\)")  %>% str_remove("\\(w\\)") %>% str_replace(",", "\\.") %>% as.numeric() %>% `<`(0.05) & `Коэффициент (шансы)` %>% str_replace(",", "\\.") %>% as.numeric() %>% `<`(1), color = "green", j = "Коэффициент (шансы)") %>%
+  merge_h(i = ~ `Переменная` == `p-value`) %>%
+  bold(i = ~ `Переменная` == `p-value`)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
