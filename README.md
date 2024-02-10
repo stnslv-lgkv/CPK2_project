@@ -79,7 +79,9 @@ Following results have been obtained regarding particular taxon levels:
 5. UMAP Clustering: Despite discernible clustering in UMAP analysis, the clusters lacked a clear pattern or link to specific health conditions or states within the dataset.
 
 ### Conclusion
-Despite highlighting important classes, it is worth noting that the exact mechanisms of how these classes influence IBS require more research, as the higher the taxonomic level, the larger it is. As  it contains more general information, we may find fewer subtle differences
+Despite highlighting important classes, it is worth noting that the exact mechanisms of how these classes influence IBS require more research, as the higher the taxonomic level, the larger it is. As  it contains more general information, we may find fewer subtle differences.
+
+Our investigation into the microbiome at the genus level has unveiled significant insights alongside considerable analytical hurdles, notably the profound batch effects impacting taxon abundance measurements across different research identifiers. This noise could mask biological signals, suggesting that observed disparities in taxon abundance might not strictly reflect health state variations but could also stem from methodological inconsistencies. Despite initial promising results from the Boruta feature selection and the observed impact of health state on taxon abundance, the subsequent predictive modeling using a random forest approach, evidenced by an overly optimistic AUC of 0.9986, accuracy of 96.49%, and a Kappa of 0.9163, likely reflects the model's sensitivity to batch effects rather than a true biological association. This misalignment, coupled with the lack of clinically meaningful clusters in UMAP analysis, underscores the complexity of microbiome data analysis and the necessity for careful methodological considerations.
 
 
 ### References
