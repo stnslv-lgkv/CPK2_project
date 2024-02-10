@@ -60,12 +60,12 @@ The following **tasks** were set in order to achieve the goal:
 Raw sequencing data from six researches in NCBI were processed into percentages for various bacterial taxa identified across 285 individuals, including their health information and bacterial function data. The combined dataset included both healthy individuals and those with IBS-C, covering health status, age, sex, sequencing regions, and bacterial taxa (Order to Genus). Analysis methods included descriptive statistics, data visualization (box plots, histograms, word clouds), statistical tests (Wilcoxon signed-rank, Brunner Munzel, logistic regression), and machine learning models (Random Forest, UMAP, binary logistic regression).
 Following results have been obtained regarding particular taxon levels:
 
-Class:
+**Class**:
 1. Subjects' sleep duration and antibiotic use were evaluated. Healthy individuals typically slept 7-8 hours. Extended antibiotic use correlated with a higher occurrence of IBS, likely due to gut bacterial imbalances and resistant strains that can cause inflammation. Additionally, IBS was more common in women.
 2. Binary logistic regression modeled the impact of certain variables on the likelihood of health_state, with Cyanobacteriia and Anaerolineae increasing disease odds, and ABY1, Spirochaetia, Coriobacteriia, and Actinobacteria decreasing them.
 3. The dataset lacked gas-producing bacterial classes, thus their link to constipation-predominant IBS was not evaluated.
 
-Family:
+**Family**:
 1. Gas producer bacteria from Veillonellaceae family differs significantly in healthy people and people with IBS-C
 2. ML model built on Random forest algorithm can efficiently separate  subjects with and without IBS-C 
 3. By using the UMAP algorithm it is possible to divide research subjects into distinct clusters, where the health status makes a significant contribution, but this factor is not the only one
