@@ -60,6 +60,12 @@ The following **tasks** were set in order to achieve the goal:
 Raw sequencing data from six researches in NCBI were processed into percentages for various bacterial taxa identified across 285 individuals, including their health information and bacterial function data. The combined dataset included both healthy individuals and those with IBS-C, covering health status, age, sex, sequencing regions, and bacterial taxa (Order to Genus). Analysis methods included descriptive statistics, data visualization (box plots, histograms, word clouds), statistical tests (Wilcoxon signed-rank, Brunner Munzel, logistic regression), and machine learning models (Random Forest, UMAP, binary logistic regression).
 Following results have been obtained regarding particular taxon levels:
 
+**Order**:
+1. At the Order level it is impossible to assess the relationship of IBS Constipation  with gas producers or bacteria with other certain function.
+2. There is a statistically significant difference in the distribution of the percentage of bacteria between different groups by gender, research_ID, state of health.
+3. ML model based on the random forest algorithm is built, which is able to separate patients with IBS-C from healthy people.
+4. UMAP Clustering: Despite discernible clustering in UMAP analysis, the clusters lacked a clear pattern or link to specific health conditions or states within the dataset.
+
 **Class**:
 1. Subjects' sleep duration and antibiotic use were evaluated. Healthy individuals typically slept 7-8 hours. Extended antibiotic use correlated with a higher occurrence of IBS, likely due to gut bacterial imbalances and resistant strains that can cause inflammation. Additionally, IBS was more common in women.
 2. Binary logistic regression modeled the impact of certain variables on the likelihood of health_state, with Cyanobacteriia and Anaerolineae increasing disease odds, and ABY1, Spirochaetia, Coriobacteriia, and Actinobacteria decreasing them.
@@ -71,7 +77,6 @@ Following results have been obtained regarding particular taxon levels:
 3. By using the UMAP algorithm it is possible to divide research subjects into distinct clusters, where the health status makes a significant contribution, but this factor is not the only one
 
 **Genus**:
-
 1. Batch Effects: Analysis revealed significant batch effects impacting taxon abundance across various research identifiers.
 2. Health State Influence: Kruskal-Wallis tests showed a significant impact of Health_State on taxon abundance, with a preponderance of low p-values indicating non-random disparities.
 3. Association with IBS-C: A Generalized Linear Mixed Model indicated no significant link between gas-producing bacterial presence and IBS-C
