@@ -70,7 +70,7 @@ Following results have been obtained regarding particular taxon levels:
 2. ML model built on Random forest algorithm can efficiently separate  subjects with and without IBS-C 
 3. By using the UMAP algorithm it is possible to divide research subjects into distinct clusters, where the health status makes a significant contribution, but this factor is not the only one
 
-**Genus level**:
+**Genus**:
 
 1. Batch Effects: Analysis revealed significant batch effects impacting taxon abundance across various research identifiers.
 2. Health State Influence: Kruskal-Wallis tests showed a significant impact of Health_State on taxon abundance, with a preponderance of low p-values indicating non-random disparities.
