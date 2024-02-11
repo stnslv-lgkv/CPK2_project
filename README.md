@@ -57,7 +57,7 @@ The following **tasks** were set in order to achieve the goal:
 4. Evaluation of the correlation between the presence/number of gas-producing bacteria and the constipation type of IBS
 
 ### Results
-Raw sequencing data from six researches in NCBI were processed into percentages for various bacterial taxa identified across 285 individuals, including their health information and bacterial function data. The combined dataset included both healthy individuals and those with IBS-C, covering health status, age, sex, sequencing regions, and bacterial taxa (Order to Genus). Analysis methods included descriptive statistics, data visualization (box plots, histograms, word clouds), statistical tests (Wilcoxon signed-rank, Brunner Munzel, logistic regression), and machine learning models (Random Forest, UMAP, binary logistic regression).
+Raw sequencing data from six researches in NCBI were processed into percentages for various bacterial taxa identified across 285 individuals, including their health information and bacterial function data. The combined dataset included both healthy individuals and those with IBS-C, covering health status, age, sex, sequencing regions, and bacterial taxa (Order to Genus). Analysis methods included descriptive statistics, data visualization (box plots, histograms, word clouds), statistical tests (Wilcoxon signed-rank, Brunner Munzel, Kruskal–Wallis test, logistic regression), and machine learning models (Random Forest, UMAP, binary logistic regression).
 Following results have been obtained regarding particular taxon levels:
 
 **Order**:
